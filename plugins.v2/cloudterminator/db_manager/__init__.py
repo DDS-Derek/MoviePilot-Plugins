@@ -1,3 +1,4 @@
+from pathlib import Path
 from typing import Any, Generator, Self, List
 
 from sqlalchemy import create_engine, and_, inspect
@@ -11,11 +12,6 @@ class __DBManager:
     """
     数据库管理器，
     """
-    # 数据库目录
-    db_path = None
-    # 数据库文件名
-    db_filename = None
-
     # 数据库引擎
     Engine = None
     # 会话工厂
@@ -23,14 +19,14 @@ class __DBManager:
     # 多线程全局使用的数据库会话
     ScopedSession = None
 
-    def init_database(self):
+    def init_database(self, db_path: Path, db_filename: str):
         """
         初始化数据库引擎
         """
-        if not self.db_path.exists():
-            self.db_path.mkdir(parents=True, exist_ok=True)
+        if not db_path.exists():
+            db_path.mkdir(parents=True, exist_ok=True)
         db_kwargs = {
-            "url": f"sqlite:///{self.db_path}/{self.db_filename}",
+            "url": f"sqlite:///{db_path}/{db_filename}",
             "pool_pre_ping": settings.DB_POOL_PRE_PING,
             "echo": settings.DB_ECHO,
             "pool_recycle": settings.DB_POOL_RECYCLE,
@@ -57,18 +53,19 @@ class __DBManager:
             return False
         return True
 
-    def get_db(self) -> Generator:
-        """
-        获取数据库会话，用于WEB请求
-        :return: Session
-        """
-        db = None
-        try:
-            db = self.SessionFactory()
-            yield db
-        finally:
-            if db:
-                db.close()
+
+def get_db() -> Generator:
+    """
+    获取数据库会话，用于WEB请求
+    :return: Session
+    """
+    db = None
+    try:
+        db = ct_db_manager.SessionFactory()
+        yield db
+    finally:
+        if db:
+            db.close()
 
 
 def db_update(func):
