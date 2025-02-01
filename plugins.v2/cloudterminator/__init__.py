@@ -13,12 +13,11 @@ from app.core.config import settings
 from app.plugins import _PluginBase
 from app.schemas import NotificationType
 
+from .clouddisk.u115 import u115_manager
 from .db_manager import ct_db_manager
 from .db_manager.init import init_db, update_db
 from ...core.event import eventmanager, Event
 from ...schemas.types import EventType
-
-from .strmhelper.u115 import U115StrmHelper
 
 notify_lock = threading.Lock()
 
@@ -114,6 +113,8 @@ class CloudTerminator(_PluginBase):
         self.__302_server_log_filename = "pan302.log"
         # 消息存储
         self.__messages = {}
+        # 115网盘客户端
+        self.__u115_client = None
         # 初始化数据库
         self.init_database()
 
@@ -596,30 +597,36 @@ class CloudTerminator(_PluginBase):
         finally:
             self.__update_config()
 
-    def once_run(self):
-        """
-        单次运行
-        """
-        try:
-            if self._onlyonce:
-                pass
-                # client = U115StrmHelper(f"{self.__db_path}/file_list.db", p115client)
-        except Exception as e:
-            raise e
-        finally:
-            self._onlyonce = False
-            self.__update_config()
+    """ 115云盘 """
 
-    """ 115云盘 strm """
+    def get_u115_client(self):
+        """
+        获取115云盘客户端
+        """
+        if not self._u115_cookie:
+            return None
+        if not self.__u115_client:
+            self.__u115_client = u115_manager.connect(self._u115_cookie)
+        return True
+
+    def close_u115_client(self):
+        """
+        关闭115云盘客户端
+        """
+        if self._u115_client:
+            u115_manager.disconnect(self.__u115_client)
+        # 清除客户端的缓存
+        self.__u115_client = None
 
     # todo：2.2.7新增整理链式，后续替换
     @eventmanager.register(EventType.TransferComplete)
     @logs_oper("115云盘STRM")
     def sync_u115_strm(self, event: Event) -> bool:
         """
-        同步STRM
+        自动增量式同步STRM
         """
         try:
+            self.__sync_u115_strm()
             return True
         except Exception as e:
             raise e
@@ -627,20 +634,27 @@ class CloudTerminator(_PluginBase):
     @logs_oper(oper_name="全量同步")
     def all_sync_u115_strm(self) -> bool:
         """
-        全量同步
+        手动全量式同步STRM
         """
         try:
+            self.__sync_u115_strm()
             return True
         except Exception as e:
             raise e
         finally:
-            if self._u115_onlyonce is False:
-                self.__update_config()
+            self._u115_onlyonce = False
+            self.__update_config()
+
+    def __sync_u115_strm(self) -> bool:
+        """
+        手动全量与自动增量的共同逻辑
+        """
+        pass
 
     """ 302 server"""
 
     @staticmethod
-    def __proxy_302_server(method, path, json):
+    def u115_proxy_302_server(method, path, json):
         """
         302 代理服务器
         :param method: 请求方法, GET/POST/PUT/DELETE
@@ -661,11 +675,11 @@ class CloudTerminator(_PluginBase):
         初始化数据库
         """
         if not ct_db_manager.is_initialized():
-            ct_db_manager.db_path = self.__db_path
-            ct_db_manager.db_filename = self.__db_filename
-            ct_db_manager.database_path = self.__database_path
-            ct_db_manager.init_database()
+            # 初始化数据库会话
+            ct_db_manager.init_database(db_path=self.__db_path, db_filename=self.__db_filename)
+            # 表单补全
             init_db(engine=ct_db_manager.Engine)
+            # 更新数据库
             update_db(db_dir=self.__db_path, db_filename=self.__db_filename, database_dir=self.__database_path)
         return True
 

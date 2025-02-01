@@ -4,17 +4,16 @@ from p115 import P115Client
 from app.log import logger
 
 
-class __U115Manage:
+class __U115Manager:
     """
     115 网盘管理器
     """
 
-    def connect(self):
+    def connect(self, cookie: Optional[dict | str]) -> Optional[P115Client]:
         """
         连接 115 网盘
         """
         try:
-            cookie = None
             if not cookie:
                 raise ValueError("cookie is required")
             ssoent = self.get_ssoent(cookie=cookie)
@@ -23,14 +22,16 @@ class __U115Manage:
             return p115client
         except Exception as e:
             logger.error(f"115 网盘连接失败: {e}")
+            return None
 
     @staticmethod
-    def disconnect(p115client: Optional[P115Client]):
+    def disconnect(p115client: Optional[P115Client]) -> bool:
         """
         断开 115 网盘连接
         """
         if p115client:
             p115client.logout()
+        return True
 
     @staticmethod
     def get_ssoent(cookie: Optional[str]) -> Optional[str]:
@@ -66,7 +67,7 @@ class __U115Manage:
         return None
 
     @property
-    def ssoent_map(self):
+    def ssoent_map(self) -> dict:
         """
         设备字典
 
@@ -152,4 +153,5 @@ class __U115Manage:
 
         }
 
-u115_manage = __U115Manage()
+
+u115_manager = __U115Manager()

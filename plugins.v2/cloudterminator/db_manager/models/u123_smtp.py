@@ -4,7 +4,7 @@ from sqlalchemy.orm import Session
 from ...db_manager import db_update, db_query, CloudTerminatorBase
 
 
-class U123_Strm_Files(CloudTerminatorBase):
+class U123StrmFiles(CloudTerminatorBase):
     # ID
     id = Column(Integer, Sequence('id'), primary_key=True, index=True)
     # 文件路径
@@ -13,21 +13,26 @@ class U123_Strm_Files(CloudTerminatorBase):
     content = Column(String)
 
     @staticmethod
-    @db_update
-    def add_file(db: Session, **kwargs):
-        db.add(U123_Strm_Files(**kwargs))
+    @db_query
+    def get_by_path(db: Session, file_path: str):
+        return db.query(U123StrmFiles).filter(U123StrmFiles.file_path == file_path).first()
 
     @staticmethod
     @db_query
-    def get_file_by_path(db: Session, file_path: str):
-        return db.query(U123_Strm_Files).filter(U123_Strm_Files.file_path == file_path).first()
+    def get_by_id(db: Session, file_id: int):
+        return db.query(U123StrmFiles).filter(U123StrmFiles.id == file_id).first()
 
-    @staticmethod
     @db_update
-    def update_file_by_path(db: Session, file_path: str, key: str, value: any):
-        db.query(U123_Strm_Files).filter(U123_Strm_Files.file_path == file_path).first.update({key: value})
+    def delete_by_path(self, db: Session, file_path: str):
+        data = self.get_by_path(db, file_path)
+        if data:
+            data.delete(db, data.id)
+        return True
 
-    @staticmethod
     @db_update
-    def delete_file_by_path(db: Session, file_path: str):
-        db.query(U123_Strm_Files).filter(U123_Strm_Files.file_path == file_path).first.delete()
+    def delete_by_id(self, db: Session, file_id: int):
+        data = self.get_by_id(db, file_id)
+        if data:
+            data.delete(db, data.id)
+        return True
+
