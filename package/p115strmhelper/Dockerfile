@@ -1,4 +1,4 @@
-FROM python:3.12-bookworm as builder
+FROM python:3.13-bookworm as builder
 
 RUN pip install --no-cache --upgrade pip && \
     pip install --no-cache pyinstaller
