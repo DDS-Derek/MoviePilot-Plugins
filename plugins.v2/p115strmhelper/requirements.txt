@@ -1,4 +1,4 @@
 orjson==3.10.16
 p115client @ https://github.com/ChenyangGao/p115client/archive/d7e20df71d2b7545e74367fc6340117e6927c252.zip
-python-iterutils==0.1.11
+python-iterutils==0.2.2
 p115rsacipher==0.0.1
