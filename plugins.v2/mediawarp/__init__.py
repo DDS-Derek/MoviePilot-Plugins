@@ -665,8 +665,7 @@ class MediaWarp(_PluginBase):
             Path(self.__config_path).mkdir(parents=True, exist_ok=True)
 
             logger.info(f"正在下载: {url}")
-            proxies = settings.PROXY
-            response = requests.get(url, stream=True, proxies=proxies)
+            response = requests.get(url, stream=True, proxies=settings.PROXY)
             response.raise_for_status()
 
             with open(temp_file, "wb") as f:
