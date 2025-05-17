@@ -9,7 +9,7 @@
         "preview": "vite preview"
     },
     "dependencies": {
-        "@vueuse/core": "^10.6.0",
+        "@vueuse/core": "^13.0.0",
         "cron-parser": "^4.9.0",
         "cronstrue": "^2.48.0",
         "echarts": "^5.4.3",
