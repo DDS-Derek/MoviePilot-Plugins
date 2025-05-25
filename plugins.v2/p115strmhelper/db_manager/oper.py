@@ -11,7 +11,9 @@ class FileDbHelper(DbOper):
     """
 
     def process_item(self, item: Dict) -> List[Dict]:
-        """处理单个项目，分离文件夹和文件数据"""
+        """
+        处理单个项目，分离文件夹和文件数据
+        """
         results = []
         ancestors = item.get("ancestors", [])
 
@@ -50,6 +52,28 @@ class FileDbHelper(DbOper):
         )
 
         return results
+
+    def process_life_file_item(self, event, file_path: str) -> List[Dict]:
+        """
+        处理115生活事件文件 event
+        """
+        return [
+            {
+                "table": "files",
+                "data": {
+                    "id": event["file_id"],
+                    "parent_id": event["parent_id"],
+                    "name": event["file_name"],
+                    "sha1": event.get("sha1", ""),
+                    "size": event.get("file_size", 0),
+                    "pickcode": event.get("pick_code", ""),
+                    "ctime": event.get("create_time", 0),
+                    "mtime": event.get("update_time", 0),
+                    "path": str(file_path),
+                    "extra": str(event),
+                },
+            }
+        ]
 
     def upsert_batch(self, batch: List[Dict]):
         """

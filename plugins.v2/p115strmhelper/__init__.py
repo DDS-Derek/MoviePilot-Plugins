@@ -2427,23 +2427,9 @@ class P115StrmHelper(_PluginBase):
                         _schedule_notification()
             else:
                 _databasehelper.upsert_batch(
-                    [
-                        {
-                            "table": "files",
-                            "data": {
-                                "id": event["file_id"],
-                                "parent_id": event["parent_id"],
-                                "name": event["file_name"],
-                                "sha1": event.get("sha1", ""),
-                                "size": event.get("file_size", 0),
-                                "pickcode": event.get("pick_code", ""),
-                                "ctime": event.get("create_time", 0),
-                                "mtime": event.get("update_time", 0),
-                                "path": str(file_path),
-                                "extra": str(event),
-                            },
-                        }
-                    ]
+                    _databasehelper.process_life_file_item(
+                        event=event, file_path=file_path
+                    )
                 )
                 # 文件情况，直接生成
                 file_path = Path(target_dir) / Path(file_path).relative_to(
