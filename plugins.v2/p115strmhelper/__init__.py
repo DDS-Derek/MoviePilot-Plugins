@@ -2583,16 +2583,26 @@ class P115StrmHelper(_PluginBase):
                             return None
                 return None
 
+            _databasehelper = DatabaseHelper()
+
+            file_path = None
             file_category = event["file_category"]
-            file_path = __get_file_path(
-                file_name=str(event["file_name"]),
-                file_size=str(event["file_size"]),
-                file_id=str(event["file_id"]),
-                file_category=file_category,
-            )
+            file_item = _databasehelper.get_by_id(int(event["file_id"]))
+            if file_item:
+                file_path = file_item.get("path", "")
+            if not file_path:
+                file_path = __get_file_path(
+                    file_name=str(event["file_name"]),
+                    file_size=str(event["file_size"]),
+                    file_id=str(event["file_id"]),
+                    file_category=file_category,
+                )
+            else:
+                logger.debug(f"【监控生活事件】通过数据库获取路径：{file_path}")
             if not file_path:
                 return
 
+            pan_file_path = file_path
             # 优先匹配待整理目录，如果删除的目录为待整理目录则不进行操作
             if self._pan_transfer_enabled and self._pan_transfer_paths:
                 if self.pathmatchinghelper.get_run_transfer_path(
@@ -2624,6 +2634,8 @@ class P115StrmHelper(_PluginBase):
             else:
                 Path(file_path).unlink(missing_ok=True)
                 __remove_parent_dir(Path(file_path))
+            logger.info(pan_file_path)
+            _databasehelper.remove_by_path_batch(str(pan_file_path))
             logger.info(f"【监控生活事件】{file_path} 已删除")
 
         def new_creata_path(event):

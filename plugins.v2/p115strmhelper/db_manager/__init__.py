@@ -195,13 +195,10 @@ class DbOper:
     数据库操作基类
     """
 
-    def __init__(self, db: Session = None):
-        self._db = db or ct_db_manager.ScopedSession()
+    _db: Session = None
 
-    def __del__(self):
-        # 确保在对象销毁时关闭 Session
-        if hasattr(self, "_db") and self._db:
-            self._db.close()
+    def __init__(self, db: Session = None):
+        self._db = db
 
 
 # 全局数据库会话

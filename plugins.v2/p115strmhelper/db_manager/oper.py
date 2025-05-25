@@ -3,7 +3,6 @@ from typing import Dict, Optional, List
 from . import DbOper
 from .models.folder import Folder
 from .models.file import File
-from sqlalchemy import select
 
 
 class DatabaseHelper(DbOper):
@@ -53,91 +52,77 @@ class DatabaseHelper(DbOper):
         return results
 
     def upsert_batch(self, batch: List[Dict]):
-        """批量写入或更新数据"""
-        session = self._db
-        try:
-            for entry in batch:
-                model = Folder if entry["table"] == "folders" else File
-                session.merge(model(**entry["data"]))
-            session.commit()
-        except Exception as e:
-            session.rollback()
-            raise e
+        """
+        批量写入或更新数据
+        """
+        File.upsert_batch(self._db, batch)
+        Folder.upsert_batch(self._db, batch)
+        return True
 
     def get_by_path(self, path: str) -> Optional[Dict]:
-        """通过路径获取项目"""
-        session = self._db
-        try:
-            # 先查文件
-            file = session.execute(
-                select(File).where(File.path == path)
-            ).scalar_one_or_none()
+        """
+        通过路径获取项目
+        """
+        file = File.get_by_path(self._db, path)
+        if file:
+            return {
+                **file.__dict__,
+                "type": "file",
+                "_sa_instance_state": None,
+            }
+        folder = Folder.get_by_path(self._db, path)
+        if folder:
+            return {**folder.__dict__, "type": "folder", "_sa_instance_state": None}
+        return None
 
-            if file:
-                return {
-                    **file.__dict__,
-                    "type": "file",
-                    # 移除内部属性
-                    "_sa_instance_state": None,
-                }
-
-            # 再查文件夹
-            folder = session.execute(
-                select(Folder).where(Folder.path == path)
-            ).scalar_one_or_none()
-
-            if folder:
-                return {**folder.__dict__, "type": "folder", "_sa_instance_state": None}
-
-            return None
-        except Exception as e:
-            self._db.rollback()
-            raise e
+    def get_by_id(self, id: int) -> Optional[Dict]:
+        """
+        通过路径获取项目
+        """
+        file = File.get_by_id(self._db, id)
+        if file:
+            return {
+                **file.__dict__,
+                "type": "file",
+                "_sa_instance_state": None,
+            }
+        folder = Folder.get_by_id(self._db, id)
+        if folder:
+            return {**folder.__dict__, "type": "folder", "_sa_instance_state": None}
+        return None
 
     def get_children(self, path: str) -> Dict:
-        """获取路径下的所有子项"""
-        session = self._db
-        try:
-            # 获取父文件夹ID
-            parent = session.execute(
-                select(Folder).where(Folder.path == path)
-            ).scalar_one_or_none()
+        """
+        获取路径下的所有子项
+        """
+        parent = Folder.get_by_path(self._db, path)
+        if not parent:
+            return {"files": [], "subfolders": []}
+        parent_id = parent.id
 
-            if not parent:
-                return {"files": [], "subfolders": []}
+        files = File.get_by_parent_id(self._db, parent_id)
+        subfolders = Folder.get_by_parent_id(self._db, parent_id)
 
-            parent_id = parent.id
+        def clean_record(record):
+            d = record.__dict__
+            d.pop("_sa_instance_state", None)
+            d["type"] = "file" if isinstance(record, File) else "folder"
+            return d
 
-            # 查询子文件
-            files = (
-                session.execute(select(File).where(File.parent_id == parent_id))
-                .scalars()
-                .all()
-            )
+        return {
+            "files": [clean_record(f) for f in files],
+            "subfolders": [clean_record(sf) for sf in subfolders],
+            "meta": {
+                "parent_path": path,
+                "parent_id": parent_id,
+                "total_count": len(files) + len(subfolders),
+            },
+        }
 
-            # 查询子文件夹
-            subfolders = (
-                session.execute(select(Folder).where(Folder.parent_id == parent_id))
-                .scalars()
-                .all()
-            )
-
-            # 转换为字典并清理内部属性
-            def clean_record(record):
-                d = record.__dict__
-                d.pop("_sa_instance_state", None)
-                d["type"] = "file" if isinstance(record, File) else "folder"
-                return d
-
-            return {
-                "files": [clean_record(f) for f in files],
-                "subfolders": [clean_record(sf) for sf in subfolders],
-                "meta": {
-                    "parent_path": path,
-                    "parent_id": parent_id,
-                    "total_count": len(files) + len(subfolders),
-                },
-            }
-        except Exception as e:
-            self._db.rollback()
-            raise e
+    def remove_by_path_batch(self, path: str):
+        """
+        通过路径批量删除
+        """
+        File.remove_by_path_batch(self._db, path)
+        Folder.remove_by_path_batch(self._db, path)
+        return True
