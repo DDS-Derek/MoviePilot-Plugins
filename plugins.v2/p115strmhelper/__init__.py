@@ -22,7 +22,6 @@ import requests
 from requests.exceptions import HTTPError
 from orjson import dumps, loads
 from cachetools import cached, TTLCache, LRUCache
-from cachetools.keys import hashkey
 from p115client import P115Client
 from p115client.exception import DataError
 from p115client.tool.iterdir import iter_files_with_path, get_path_to_cid, share_iterdir
@@ -32,7 +31,7 @@ from p115rsacipher import encrypt, decrypt
 
 from .db_manager import ct_db_manager
 from .db_manager.init import init_db, update_db
-from .db_manager.oper import DatabaseHelper
+from .db_manager.oper import FileDbHelper
 
 from app import schemas
 from app.schemas import (
@@ -431,7 +430,7 @@ class FullSyncStrmHelper:
         self.pan_transfer_enabled = pan_transfer_enabled
         self.pan_transfer_paths = pan_transfer_paths
         self.strm_url_format = strm_url_format
-        self.databasehelper = DatabaseHelper()
+        self.databasehelper = FileDbHelper()
         self.pathmatchinghelper = PathMatchingHelper()
         self.mediainfodownloader = mediainfodownloader
         self.download_mediainfo_list = []
@@ -901,6 +900,8 @@ class P115StrmHelper(_PluginBase):
         super().__init__()
         # 类名小写
         class_name = self.__class__.__name__.lower()
+        # 插件配置文件路径
+        self.__plugin_config_path = settings.PLUGIN_DATA_PATH / class_name
         # 数据库文件路径
         self.__db_path = (
             settings.PLUGIN_DATA_PATH / class_name / "p115strmhelper_file.db"
@@ -1042,6 +1043,8 @@ class P115StrmHelper(_PluginBase):
         """
         初始化数据库
         """
+        if not Path(self.__plugin_config_path).exists():
+            Path(self.__plugin_config_path).mkdir(parents=True, exist_ok=True)
         if not ct_db_manager.is_initialized():
             # 初始化数据库会话
             ct_db_manager.init_database(db_path=self.__db_path)
@@ -2298,7 +2301,7 @@ class P115StrmHelper(_PluginBase):
             """
             创建 STRM 文件
             """
-            _databasehelper = DatabaseHelper()
+            _databasehelper = FileDbHelper()
 
             pickcode = event["pick_code"]
             file_category = event["file_category"]
@@ -2583,7 +2586,7 @@ class P115StrmHelper(_PluginBase):
                             return None
                 return None
 
-            _databasehelper = DatabaseHelper()
+            _databasehelper = FileDbHelper()
 
             file_path = None
             file_category = event["file_category"]

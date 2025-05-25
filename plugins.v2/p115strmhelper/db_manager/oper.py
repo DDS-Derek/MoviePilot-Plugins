@@ -5,9 +5,9 @@ from .models.folder import Folder
 from .models.file import File
 
 
-class DatabaseHelper(DbOper):
+class FileDbHelper(DbOper):
     """
-    数据库操作
+    文件类数据库操作
     """
 
     def process_item(self, item: Dict) -> List[Dict]:
