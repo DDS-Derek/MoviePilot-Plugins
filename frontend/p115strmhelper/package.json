@@ -16,7 +16,7 @@
         "moviepilot-plugin-component": "file:",
         "qrcode.vue": "^3.6.0",
         "vue": "^3.3.4",
-        "vue-echarts": "^6.6.1",
+        "vue-echarts": "^7.0.0",
         "vuetify": "^3.4.0"
     },
     "devDependencies": {
