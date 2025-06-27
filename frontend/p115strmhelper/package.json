@@ -21,7 +21,7 @@
     },
     "devDependencies": {
         "@originjs/vite-plugin-federation": "^1.3.5",
-        "@vitejs/plugin-vue": "^4.4.0",
+        "@vitejs/plugin-vue": "^6.0.0",
         "vite": "^5.0.0"
     }
 }
