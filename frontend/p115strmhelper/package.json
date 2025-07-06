@@ -11,7 +11,7 @@
     "dependencies": {
         "@vueuse/core": "^10.6.0",
         "cron-parser": "^4.9.0",
-        "cronstrue": "^2.48.0",
+        "cronstrue": "^3.0.0",
         "echarts": "^5.4.3",
         "moviepilot-plugin-component": "file:",
         "qrcode.vue": "^3.6.0",
