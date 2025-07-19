@@ -1,4 +1,6 @@
-from cachetools import LRUCache
+from typing import List, Dict, MutableMapping
+
+from cachetools import LRUCache, TTLCache
 
 
 class IdPathCache:
@@ -35,3 +37,12 @@ class IdPathCache:
         """
         self.id_to_dir.clear()
         self.dir_to_id.clear()
+
+
+idpathcacher = IdPathCache()
+cacher_delete_pan_transfer_list = []
+cacher_creata_pan_transfer_list = []
+cacher_top_delete_pan_transfer_list: Dict[str, List] = {}
+cacher_create_strm_file_dict: MutableMapping[str, List] = TTLCache(
+    maxsize=1_000_000, ttl=600
+)

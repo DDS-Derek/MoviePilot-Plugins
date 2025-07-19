@@ -6,21 +6,27 @@ from pathlib import Path
 from itertools import batched
 
 from sqlalchemy.orm.exc import MultipleResultsFound
+from p115client import P115Client
 from p115client.tool.export_dir import export_dir_parse_iter
 from p115client.tool.fs_files import iter_fs_files
 from p115client.tool.iterdir import iter_files_with_path, share_iterdir
 
-from ..core.cache import IdPathCache
+from ..core.cache import idpathcacher
+from ..core.config import configer
 from ..utils.tree import DirectoryTree
-from ..core.scrape_metadata import media_scrape_metadata
-from ..helper.mediainfo_download import MediaInfoDownloader
+from ..core.scrape import media_scrape_metadata
 from ..db_manager.oper import FileDbHelper
-from ..utils.path import PathMatchingHelper
+from ..utils.path import PathUtils
+from ..helper.mediainfo_download import MediaInfoDownloader
 
 from app.log import logger
 from app.core.config import settings
-from app.schemas import RefreshMediaItem, ServiceInfo
+from app.core.meta import MetaBase
+from app.core.context import MediaInfo
+from app.chain.storage import StorageChain
+from app.schemas import RefreshMediaItem, ServiceInfo, TransferInfo
 from app.helper.mediaserver import MediaServerHelper
+from app.utils.system import SystemUtils
 
 
 class IncrementSyncStrmHelper:
@@ -28,38 +34,37 @@ class IncrementSyncStrmHelper:
     增量同步 STRM 文件
     """
 
-    def __init__(
-        self,
-        client,
-        user_rmt_mediaext: str,
-        user_download_mediaext: str,
-        server_address: str,
-        pan_transfer_enabled: bool,
-        pan_transfer_paths: str,
-        strm_url_format: str,
-        mp_mediaserver_paths: str,
-        scrape_metadata_enabled: bool,
-        scrape_metadata_exclude_paths: str,
-        media_server_refresh_enabled: bool,
-        mediaservers: List,
-        mediainfodownloader: MediaInfoDownloader,
-        id_path_cache: IdPathCache,
-        auto_download_mediainfo: bool = False,
-    ):
+    def __init__(self, client: P115Client, mediainfodownloader: MediaInfoDownloader):
         self.client = client
+        self.mediainfodownloader = mediainfodownloader
         self.rmt_mediaext = [
-            f".{ext.strip()}" for ext in user_rmt_mediaext.replace("，", ",").split(",")
+            f".{ext.strip()}"
+            for ext in configer.get_config("user_rmt_mediaext")
+            .replace("，", ",")
+            .split(",")
         ]
         self.download_mediaext = [
             f".{ext.strip()}"
-            for ext in user_download_mediaext.replace("，", ",").split(",")
+            for ext in configer.get_config("user_download_mediaext")
+            .replace("，", ",")
+            .split(",")
         ]
-        self.auto_download_mediainfo = auto_download_mediainfo
-        self.mp_mediaserver_paths = mp_mediaserver_paths
-        self.scrape_metadata_enabled = scrape_metadata_enabled
-        self.scrape_metadata_exclude_paths = scrape_metadata_exclude_paths
-        self.media_server_refresh_enabled = media_server_refresh_enabled
-        self.mediaservers = mediaservers
+        self.auto_download_mediainfo = configer.get_config(
+            "increment_sync_auto_download_mediainfo_enabled"
+        )
+        self.mp_mediaserver_paths = configer.get_config(
+            "increment_sync_mp_mediaserver_paths"
+        )
+        self.scrape_metadata_enabled = configer.get_config(
+            "increment_sync_scrape_metadata_enabled"
+        )
+        self.scrape_metadata_exclude_paths = configer.get_config(
+            "increment_sync_scrape_metadata_exclude_paths"
+        )
+        self.media_server_refresh_enabled = configer.get_config(
+            "increment_sync_media_server_refresh_enabled"
+        )
+        self.mediaservers = configer.get_config("increment_sync_mediaservers")
         self.strm_count = 0
         self.mediainfo_count = 0
         self.strm_fail_count = 0
@@ -67,21 +72,23 @@ class IncrementSyncStrmHelper:
         self.api_count = 0
         self.strm_fail_dict: Dict[str, str] = {}
         self.mediainfo_fail_dict: List = None
-        self.server_address = server_address.rstrip("/")
-        self.pan_transfer_enabled = pan_transfer_enabled
-        self.pan_transfer_paths = pan_transfer_paths
-        self.strm_url_format = strm_url_format
+        self.server_address = configer.get_config("moviepilot_address").rstrip("/")
+        self.pan_transfer_enabled = configer.get_config("pan_transfer_enabled")
+        self.pan_transfer_paths = configer.get_config("pan_transfer_paths")
+        self.strm_url_format = configer.get_config("strm_url_format")
         self.databasehelper = FileDbHelper()
-        self.pathmatchinghelper = PathMatchingHelper()
-        self.mediainfodownloader = mediainfodownloader
-        self.id_path_cache = id_path_cache
         self.download_mediainfo_list = []
 
         # 临时文件配置
-        temp_path = settings.PLUGIN_DATA_PATH / "p115strmhelper" / "temp"
-        self.local_tree = temp_path / "increment_local_tree.txt"
-        self.pan_tree = temp_path / "increment_pan_tree.txt"
-        self.pan_to_local_tree = temp_path / "increment_pan_to_local_tree.txt"
+        self.local_tree = (
+            configer.get_config("PLUGIN_TEMP_PATH") / "increment_local_tree.txt"
+        )
+        self.pan_tree = (
+            configer.get_config("PLUGIN_TEMP_PATH") / "increment_pan_tree.txt"
+        )
+        self.pan_to_local_tree = (
+            configer.get_config("PLUGIN_TEMP_PATH") / "increment_pan_to_local_tree.txt"
+        )
 
     def __itertree(self, pan_path: str, local_path: str):
         """
@@ -136,7 +143,7 @@ class IncrementSyncStrmHelper:
         通过路径获取 cid
         先从缓存获取，再从数据库获取
         """
-        cid = self.id_path_cache.get_id_by_dir(path)
+        cid = idpathcacher.get_id_by_dir(path)
         if not cid:
             # 这里如果有多条重复数据就不进行删除文件夹操作了，说明数据库重复过多，直接放弃
             data = self.databasehelper.get_by_path(path=path)
@@ -144,7 +151,7 @@ class IncrementSyncStrmHelper:
                 cid = data.get("id", None)
                 if cid:
                     logger.debug(f"【增量STRM生成】获取 {path} cid（数据库）: {cid}")
-                    self.id_path_cache.add_cache(id=int(cid), directory=path)
+                    idpathcacher.add_cache(id=int(cid), directory=path)
                     return int(cid)
             return None
         logger.debug(f"【增量STRM生成】获取 {path} cid（缓存）: {cid}")
@@ -164,11 +171,14 @@ class IncrementSyncStrmHelper:
             if file_item:
                 return file_item.get("pickcode")
             file_path = Path(path)
+            temp_path = None
             for part in file_path.parents:
                 cid = self.__get_cid_by_path(str(part))
                 if cid:
                     temp_path = part
                     break
+            if not temp_path:
+                raise ValueError(f"无法找到路径 {path} 对应的 cid")
             for batch in batched(self.__iterdir(cid=cid, path=str(temp_path)), 7_000):
                 processed: List = []
                 for item in batch:
@@ -216,10 +226,8 @@ class IncrementSyncStrmHelper:
                 return
             logger.info(f"【增量STRM生成】{file_name} 开始刷新媒体服务器")
             if self.mp_mediaserver_paths:
-                status, mediaserver_path, moviepilot_path = (
-                    self.pathmatchinghelper.get_media_path(
-                        self.mp_mediaserver_paths, file_path
-                    )
+                status, mediaserver_path, moviepilot_path = PathUtils.get_media_path(
+                    self.mp_mediaserver_paths, file_path
                 )
                 if status:
                     logger.debug(
@@ -323,7 +331,7 @@ class IncrementSyncStrmHelper:
             new_file_path = Path(local_path)
 
             if self.pan_transfer_enabled and self.pan_transfer_paths:
-                if self.pathmatchinghelper.get_run_transfer_path(
+                if PathUtils.get_run_transfer_path(
                     paths=self.pan_transfer_paths,
                     transfer_path=str(pan_path),
                 ):
@@ -396,7 +404,7 @@ class IncrementSyncStrmHelper:
         if self.scrape_metadata_enabled:
             scrape_metadata = True
             if self.scrape_metadata_exclude_paths:
-                if self.pathmatchinghelper.get_scrape_metadata_exclude_path(
+                if PathUtils.get_scrape_metadata_exclude_path(
                     self.scrape_metadata_exclude_paths,
                     str(new_file_path),
                 ):
@@ -500,29 +508,24 @@ class FullSyncStrmHelper:
     全量生成 STRM 文件
     """
 
-    def __init__(
-        self,
-        client,
-        user_rmt_mediaext: str,
-        user_download_mediaext: str,
-        server_address: str,
-        pan_transfer_enabled: bool,
-        pan_transfer_paths: str,
-        strm_url_format: str,
-        overwrite_mode: str,
-        remove_unless_strm: bool,
-        mediainfodownloader: MediaInfoDownloader,
-        auto_download_mediainfo: bool = False,
-    ):
+    def __init__(self, client: P115Client, mediainfodownloader: MediaInfoDownloader):
         self.rmt_mediaext = [
-            f".{ext.strip()}" for ext in user_rmt_mediaext.replace("，", ",").split(",")
+            f".{ext.strip()}"
+            for ext in configer.get_config("user_rmt_mediaext")
+            .replace("，", ",")
+            .split(",")
         ]
         self.download_mediaext = [
             f".{ext.strip()}"
-            for ext in user_download_mediaext.replace("，", ",").split(",")
+            for ext in configer.get_config("user_download_mediaext")
+            .replace("，", ",")
+            .split(",")
         ]
-        self.auto_download_mediainfo = auto_download_mediainfo
+        self.auto_download_mediainfo = configer.get_config(
+            "full_sync_auto_download_mediainfo_enabled"
+        )
         self.client = client
+        self.mediainfodownloader = mediainfodownloader
         self.strm_count = 0
         self.mediainfo_count = 0
         self.strm_fail_count = 0
@@ -530,20 +533,17 @@ class FullSyncStrmHelper:
         self.remove_unless_strm_count = 0
         self.strm_fail_dict: Dict[str, str] = {}
         self.mediainfo_fail_dict: List = None
-        self.server_address = server_address.rstrip("/")
-        self.pan_transfer_enabled = pan_transfer_enabled
-        self.pan_transfer_paths = pan_transfer_paths
-        self.strm_url_format = strm_url_format
-        self.overwrite_mode = overwrite_mode
-        self.remove_unless_strm = remove_unless_strm
+        self.server_address = configer.get_config("moviepilot_address").rstrip("/")
+        self.pan_transfer_enabled = configer.get_config("pan_transfer_enabled")
+        self.pan_transfer_paths = configer.get_config("pan_transfer_paths")
+        self.strm_url_format = configer.get_config("strm_url_format")
+        self.overwrite_mode = configer.get_config("full_sync_overwrite_mode")
+        self.remove_unless_strm = configer.get_config("full_sync_remove_unless_strm")
         self.databasehelper = FileDbHelper()
-        self.pathmatchinghelper = PathMatchingHelper()
-        self.mediainfodownloader = mediainfodownloader
         self.download_mediainfo_list = []
 
-        temp_path = settings.PLUGIN_DATA_PATH / "p115strmhelper" / "temp"
-        self.local_tree = temp_path / "local_tree.txt"
-        self.pan_tree = temp_path / "pan_tree.txt"
+        self.local_tree = configer.get_config("PLUGIN_TEMP_PATH") / "local_tree.txt"
+        self.pan_tree = configer.get_config("PLUGIN_TEMP_PATH") / "pan_tree.txt"
 
     @staticmethod
     def __remove_parent_dir(file_path: Path):
@@ -647,7 +647,7 @@ class FullSyncStrmHelper:
 
                         try:
                             if self.pan_transfer_enabled and self.pan_transfer_paths:
-                                if self.pathmatchinghelper.get_run_transfer_path(
+                                if PathUtils.get_run_transfer_path(
                                     paths=self.pan_transfer_paths,
                                     transfer_path=item["path"],
                                 ):
@@ -821,39 +821,34 @@ class ShareStrmHelper:
     根据分享生成STRM
     """
 
-    def __init__(
-        self,
-        client,
-        user_rmt_mediaext: str,
-        user_download_mediaext: str,
-        share_media_path: str,
-        local_media_path: str,
-        server_address: str,
-        strm_url_format: str,
-        mediainfodownloader: MediaInfoDownloader,
-        auto_download_mediainfo: bool = False,
-    ):
+    def __init__(self, client: P115Client, mediainfodownloader: MediaInfoDownloader):
         self.rmt_mediaext = [
-            f".{ext.strip()}" for ext in user_rmt_mediaext.replace("，", ",").split(",")
+            f".{ext.strip()}"
+            for ext in configer.get_config("user_rmt_mediaext")
+            .replace("，", ",")
+            .split(",")
         ]
         self.download_mediaext = [
             f".{ext.strip()}"
-            for ext in user_download_mediaext.replace("，", ",").split(",")
+            for ext in configer.get_config("user_download_mediaext")
+            .replace("，", ",")
+            .split(",")
         ]
-        self.auto_download_mediainfo = auto_download_mediainfo
+        self.auto_download_mediainfo = configer.get_config(
+            "share_strm_auto_download_mediainfo_enabled"
+        )
         self.client = client
+        self.mediainfodownloader = mediainfodownloader
         self.strm_count = 0
         self.strm_fail_count = 0
         self.mediainfo_count = 0
         self.mediainfo_fail_count = 0
         self.strm_fail_dict: Dict[str, str] = {}
         self.mediainfo_fail_dict: List = None
-        self.share_media_path = share_media_path
-        self.local_media_path = local_media_path
-        self.server_address = server_address.rstrip("/")
-        self.strm_url_format = strm_url_format
-        self.pathmatchinghelper = PathMatchingHelper()
-        self.mediainfodownloader = mediainfodownloader
+        self.share_media_path = configer.get_config("user_share_pan_path")
+        self.local_media_path = configer.get_config("user_share_local_path")
+        self.server_address = configer.get_config("moviepilot_address").rstrip("/")
+        self.strm_url_format = configer.get_config("strm_url_format")
         self.download_mediainfo_list = []
 
     def generate_strm_files(
@@ -867,7 +862,7 @@ class ShareStrmHelper:
         """
         生成 STRM 文件
         """
-        if not self.pathmatchinghelper.has_prefix(file_path, self.share_media_path):
+        if not PathUtils.has_prefix(file_path, self.share_media_path):
             logger.debug(
                 "【分享STRM生成】此文件不在用户设置分享目录下，跳过网盘路径: %s",
                 str(file_path).replace(str(self.local_media_path), "", 1),
@@ -1013,3 +1008,280 @@ class ShareStrmHelper:
             self.strm_fail_count,
             self.mediainfo_fail_count,
         )
+
+
+class TransferStrmHelper:
+    """
+    处理事件事件STRM文件生成
+    """
+
+    @property
+    def transfer_service_infos(self) -> Optional[Dict[str, ServiceInfo]]:
+        """
+        监控MP整理 媒体服务器服务信息
+        """
+        if not configer.get_config("transfer_monitor_mediaservers"):
+            logger.warning("尚未配置媒体服务器，请检查配置")
+            return None
+
+        mediaserver_helper = MediaServerHelper()
+
+        services = mediaserver_helper.get_services(
+            name_filters=configer.get_config("transfer_monitor_mediaservers")
+        )
+        if not services:
+            logger.warning("获取媒体服务器实例失败，请检查配置")
+            return None
+
+        active_services = {}
+        for service_name, service_info in services.items():
+            if service_info.instance.is_inactive():
+                logger.warning(f"媒体服务器 {service_name} 未连接，请检查配置")
+            else:
+                active_services[service_name] = service_info
+
+        if not active_services:
+            logger.warning("没有已连接的媒体服务器，请检查配置")
+            return None
+
+        return active_services
+
+    def refresh_media_server(self, item_dest_name: str, strm_target_path, mediainfo):
+        """
+        刷新媒体服务器
+        """
+        if not self.transfer_service_infos:
+            return
+
+        logger.info(f"【监控整理STRM生成】 {item_dest_name} 开始刷新媒体服务器")
+
+        if configer.get_config("transfer_mp_mediaserver_paths"):
+            status, mediaserver_path, moviepilot_path = PathUtils.get_media_path(
+                configer.get_config("transfer_mp_mediaserver_paths"),
+                strm_target_path,
+            )
+            if status:
+                logger.info(
+                    f"【监控整理STRM生成】 {item_dest_name} 刷新媒体服务器目录替换中..."
+                )
+                strm_target_path = strm_target_path.replace(
+                    moviepilot_path, mediaserver_path
+                ).replace("\\", "/")
+                logger.info(
+                    f"【监控整理STRM生成】刷新媒体服务器目录替换: {moviepilot_path} --> {mediaserver_path}"
+                )
+                logger.info(
+                    f"【监控整理STRM生成】刷新媒体服务器目录: {strm_target_path}"
+                )
+        items = [
+            RefreshMediaItem(
+                title=mediainfo.title,
+                year=mediainfo.year,
+                type=mediainfo.type,
+                category=mediainfo.category,
+                target_path=Path(strm_target_path),
+            )
+        ]
+        for name, service in self.transfer_service_infos.items():
+            if hasattr(service.instance, "refresh_library_by_items"):
+                service.instance.refresh_library_by_items(items)
+            elif hasattr(service.instance, "refresh_root_library"):
+                service.instance.refresh_root_library()
+            else:
+                logger.warning(
+                    f"【监控整理STRM生成】 {item_dest_name} {name} 不支持刷新"
+                )
+
+    def generate_strm_files(
+        self,
+        target_dir: Path,
+        pan_media_dir: Path,
+        item_dest_path: Path,
+        basename: str,
+        url: str,
+    ):
+        """
+        依据网盘路径生成 STRM 文件
+        """
+        try:
+            pan_media_dir = str(Path(pan_media_dir))
+            pan_path = Path(item_dest_path).parent
+            pan_path = str(Path(pan_path))
+            if PathUtils.has_prefix(pan_path, pan_media_dir):
+                pan_path = pan_path[len(pan_media_dir) :].lstrip("/").lstrip("\\")
+            file_path = Path(target_dir) / pan_path
+            file_name = basename + ".strm"
+            new_file_path = file_path / file_name
+            new_file_path.parent.mkdir(parents=True, exist_ok=True)
+            with open(new_file_path, "w", encoding="utf-8") as file:
+                file.write(url)
+            logger.info(
+                "【监控整理STRM生成】生成 STRM 文件成功: %s", str(new_file_path)
+            )
+            return True, str(new_file_path)
+        except Exception as e:  # noqa: F841
+            logger.error(
+                "【监控整理STRM生成】生成 %s 文件失败: %s", str(new_file_path), e
+            )
+            return False, None
+
+    def do_generate(self, item, mediainfodownloader: MediaInfoDownloader):
+        """
+        生成 STRM 操作
+        """
+        # 转移信息
+        item_transfer: TransferInfo = item.get("transferinfo")
+        # 媒体信息
+        mediainfo: MediaInfo = item.get("mediainfo")
+        # 元数据信息
+        meta: MetaBase = item.get("meta")
+
+        item_dest_storage = item_transfer.target_item.storage
+        if item_dest_storage != "u115":
+            return
+
+        # 网盘目的地目录
+        itemdir_dest_path = item_transfer.target_diritem.path
+        # 网盘目的地路径（包含文件名称）
+        item_dest_path = item_transfer.target_item.path
+        # 网盘目的地文件名称
+        item_dest_name = item_transfer.target_item.name
+        # 网盘目的地文件名称（不包含后缀）
+        item_dest_basename = item_transfer.target_item.basename
+        # 网盘目的地文件 pickcode
+        item_dest_pickcode = item_transfer.target_item.pickcode
+        # 是否蓝光原盘
+        item_bluray = SystemUtils.is_bluray_dir(Path(itemdir_dest_path))
+        # 目标字幕文件清单
+        subtitle_list = getattr(item_transfer, "subtitle_list_new", [])
+        # 目标音频文件清单
+        audio_list = getattr(item_transfer, "audio_list_new", [])
+
+        __itemdir_dest_path, local_media_dir, pan_media_dir = PathUtils.get_media_path(
+            configer.get_config("transfer_monitor_paths"), itemdir_dest_path
+        )
+        if not __itemdir_dest_path:
+            logger.debug(
+                f"【监控整理STRM生成】{item_dest_name} 路径匹配不符合，跳过整理"
+            )
+            return
+        logger.debug("【监控整理STRM生成】匹配到网盘文件夹路径: %s", str(pan_media_dir))
+
+        if item_bluray:
+            logger.warning(
+                f"【监控整理STRM生成】{item_dest_name} 为蓝光原盘，不支持生成 STRM 文件: {item_dest_path}"
+            )
+            return
+
+        if not item_dest_pickcode:
+            logger.error(
+                f"【监控整理STRM生成】{item_dest_name} 不存在 pickcode 值，无法生成 STRM 文件"
+            )
+            return
+        if not (len(item_dest_pickcode) == 17 and str(item_dest_pickcode).isalnum()):
+            logger.error(
+                f"【监控整理STRM生成】错误的 pickcode 值 {item_dest_name}，无法生成 STRM 文件"
+            )
+            return
+        strm_url = f"{configer.get_config('moviepilot_address').rstrip('/')}/api/v1/plugin/P115StrmHelper/redirect_url?apikey={settings.API_TOKEN}&pickcode={item_dest_pickcode}"
+        if configer.get_config("strm_url_format") == "pickname":
+            strm_url += f"&file_name={item_dest_name}"
+
+        _databasehelper = FileDbHelper()
+        _databasehelper.upsert_batch(
+            _databasehelper.process_fileitem(fileitem=item_transfer.target_item)
+        )
+
+        status, strm_target_path = self.generate_strm_files(
+            target_dir=local_media_dir,
+            pan_media_dir=pan_media_dir,
+            item_dest_path=item_dest_path,
+            basename=item_dest_basename,
+            url=strm_url,
+        )
+        if not status:
+            return
+
+        try:
+            storagechain = StorageChain()
+            if subtitle_list:
+                logger.info("【监控整理STRM生成】开始下载字幕文件")
+                for _path in subtitle_list:
+                    fileitem = storagechain.get_file_item(
+                        storage="u115", path=Path(_path)
+                    )
+                    _databasehelper.upsert_batch(
+                        _databasehelper.process_fileitem(fileitem)
+                    )
+                    download_url = mediainfodownloader.get_download_url(
+                        pickcode=fileitem.pickcode
+                    )
+                    if not download_url:
+                        logger.error(
+                            f"【监控整理STRM生成】{Path(_path).name} 下载链接获取失败，无法下载该文件"
+                        )
+                        continue
+                    _file_path = Path(local_media_dir) / Path(_path).relative_to(
+                        pan_media_dir
+                    )
+                    mediainfodownloader.save_mediainfo_file(
+                        file_path=Path(_file_path),
+                        file_name=_file_path.name,
+                        download_url=download_url,
+                    )
+
+            if audio_list:
+                logger.info("【监控整理STRM生成】开始下载音频文件")
+                for _path in audio_list:
+                    fileitem = storagechain.get_file_item(
+                        storage="u115", path=Path(_path)
+                    )
+                    _databasehelper.upsert_batch(
+                        _databasehelper.process_fileitem(fileitem)
+                    )
+                    download_url = mediainfodownloader.get_download_url(
+                        pickcode=fileitem.pickcode
+                    )
+                    if not download_url:
+                        logger.error(
+                            f"【监控整理STRM生成】{Path(_path).name} 下载链接获取失败，无法下载该文件"
+                        )
+                        continue
+                    _file_path = Path(local_media_dir) / Path(_path).relative_to(
+                        pan_media_dir
+                    )
+                    mediainfodownloader.save_mediainfo_file(
+                        file_path=Path(_file_path),
+                        file_name=_file_path.name,
+                        download_url=download_url,
+                    )
+        except Exception as e:
+            logger.error(f"【监控整理STRM生成】媒体信息文件下载出现未知错误: {e}")
+
+        scrape_metadata = True
+        if configer.get_config("transfer_monitor_scrape_metadata_enabled"):
+            if configer.get_config("transfer_monitor_scrape_metadata_exclude_paths"):
+                if PathUtils.get_scrape_metadata_exclude_path(
+                    configer.get_config(
+                        "transfer_monitor_scrape_metadata_exclude_paths"
+                    ),
+                    str(strm_target_path),
+                ):
+                    logger.debug(
+                        f"【监控整理STRM生成】匹配到刮削排除目录，不进行刮削: {strm_target_path}"
+                    )
+                    scrape_metadata = False
+            if scrape_metadata:
+                media_scrape_metadata(
+                    path=strm_target_path,
+                    item_name=item_dest_name,
+                    mediainfo=mediainfo,
+                    meta=meta,
+                )
+
+        if configer.get_config("transfer_monitor_media_server_refresh_enabled"):
+            self.refresh_media_server(
+                item_dest_name=item_dest_name,
+                strm_target_path=strm_target_path,
+                mediainfo=mediainfo,
+            )
