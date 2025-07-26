@@ -525,7 +525,9 @@ class P115StrmHelper(_PluginBase):
             )
             return
         strm_helper = FullSyncStrmHelper(
-            client=servicer.client, mediainfodownloader=servicer.mediainfodownloader
+            client=servicer.client,
+            mediainfodownloader=servicer.mediainfodownloader,
+            fullsyncdbcacher=servicer.fullsyncdbcacher,
         )
         self.post_message(
             channel=event.event_data.get("channel"),

@@ -80,10 +80,16 @@ class File(P115StrmHelperBase):
           - 先判断需要写入的数据路径是否存在，存在则先删除记录
           - 写入数据
         """
-        for entry in batch:
-            if entry["table"] == "files":
-                db.execute(delete(File).where(File.path == entry["data"]["path"]))
-                db.merge(File(**entry["data"]))
+        paths_to_delete = [
+            entry["data"]["path"] for entry in batch if entry["table"] == "files"
+        ]
+        if paths_to_delete:
+            db.execute(delete(File).where(File.path.in_(paths_to_delete)))
+        files_to_merge = [
+            File(**entry["data"]) for entry in batch if entry["table"] == "files"
+        ]
+        for file in files_to_merge:
+            db.merge(file)
         return True
 
     @staticmethod

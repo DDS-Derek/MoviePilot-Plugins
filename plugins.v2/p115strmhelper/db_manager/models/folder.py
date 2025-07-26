@@ -76,10 +76,16 @@ class Folder(P115StrmHelperBase):
           - 先判断需要写入的数据路径是否存在，存在则先删除记录
           - 写入数据
         """
-        for entry in batch:
-            if entry["table"] == "folders":
-                db.execute(delete(Folder).where(Folder.path == entry["data"]["path"]))
-                db.merge(Folder(**entry["data"]))
+        paths_to_delete = [
+            entry["data"]["path"] for entry in batch if entry["table"] == "folders"
+        ]
+        if paths_to_delete:
+            db.execute(delete(Folder).where(Folder.path.in_(paths_to_delete)))
+        folders_to_merge = [
+            Folder(**entry["data"]) for entry in batch if entry["table"] == "folders"
+        ]
+        for folder in folders_to_merge:
+            db.merge(folder)
         return True
 
     @staticmethod
