@@ -1,4 +1,4 @@
 orjson~=3.10.16
-p115client==0.0.5.15.3
+p115client==0.0.5.12.3
 p115rsacipher==0.0.1
 diskcache~=5.6.3
