@@ -161,6 +161,8 @@ class IncrementSyncStrmHelper:
         """
         通过路径获取 pickcode
         """
+        last_path = None
+        processed = None
         while True:
             # 这里如果有多条重复数据直接删除文件重复信息，然后迭代重新获取
             try:
@@ -178,12 +180,16 @@ class IncrementSyncStrmHelper:
                     temp_path = part
                     break
             if not temp_path:
-                raise ValueError(f"无法找到路径 {path} 对应的 cid")
+                raise ValueError(f"数据库无数据，无法找到路径 {path} 对应的 cid")
+            if last_path and last_path == temp_path:
+                logger.debug(f"文件夹遍历错误：{last_path} {processed}")
+                raise ValueError(f"文件夹遍历错误，无法找到路径 {path} 对应的 cid")
             for batch in batched(self.__iterdir(cid=cid, path=str(temp_path)), 7_000):
                 processed: List = []
                 for item in batch:
                     processed.extend(self.databasehelper.process_fs_files_item(item))
                 self.databasehelper.upsert_batch(processed)
+            last_path = temp_path
             time.sleep(2)
 
     @property
