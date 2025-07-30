@@ -98,11 +98,12 @@
         "name": "115网盘STRM助手",
         "description": "115网盘STRM生成一条龙服务",
         "labels": "云盘",
-        "version": "1.9.13",
+        "version": "1.9.14",
         "icon": "https://raw.githubusercontent.com/jxxghp/MoviePilot-Frontend/refs/heads/v2/src/assets/images/misc/u115.png",
         "author": "DDSRem",
         "level": 1,
         "history": {
+            "v1.9.14": "更换全量同步函数",
             "v1.9.13": "优化302跳转缓存；实验功能：多端播放，可以实现多设备同时播放一部影片",
             "v1.9.12": "增加 咚咚搬砖 语言包，修复TG交互部分提示错误 ",
             "v1.9.11": "增加 繁中台湾，繁中港澳，粤韵风华 三款语言包",

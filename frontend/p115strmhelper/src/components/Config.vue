@@ -321,16 +321,22 @@
                       </v-expansion-panel-title>
                       <v-expansion-panel-text class="pa-4">
                         <v-row>
-                          <v-col cols="12" md="4">
+                          <v-col cols="12" md="3">
                             <v-switch v-model="config.full_sync_strm_log" label="输出STRM同步日志" color="primary"></v-switch>
                           </v-col>
-                          <v-col cols="12" md="4">
+                          <v-col cols="12" md="3">
                             <v-text-field v-model.number="config.full_sync_batch_num" label="全量同步批处理数量" type="number"
                               hint="每次批量处理的文件/目录数量" persistent-hint density="compact"></v-text-field>
                           </v-col>
-                          <v-col cols="12" md="4">
+                          <v-col cols="12" md="3">
                             <v-text-field v-model.number="config.full_sync_process_num" label="全量同步生成进程数" type="number"
                               hint="同时执行同步任务的进程数量" persistent-hint density="compact"></v-text-field>
+                          </v-col>
+                          <v-col cols="12" md="3">
+                            <v-select v-model="config.full_sync_iter_function" label="迭代函数" :items="[
+                              { title: 'iter_files_with_path_skim', value: 'iter_files_with_path_skim' },
+                              { title: 'iter_files_with_path', value: 'iter_files_with_path' }
+                            ]" chips closable-chips></v-select>
                           </v-col>
                         </v-row>
                       </v-expansion-panel-text>
@@ -1044,6 +1050,7 @@ const config = reactive({
   full_sync_process_num: 128,
   cron_full_sync_strm: '0 */7 * * *',
   full_sync_strm_paths: '',
+  full_sync_iter_function: 'iter_files_with_path_skim',
   increment_sync_strm_enabled: false,
   increment_sync_auto_download_mediainfo_enabled: false,
   increment_sync_cron: "0 * * * *",

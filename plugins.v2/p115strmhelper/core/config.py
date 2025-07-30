@@ -91,6 +91,8 @@ class BaseConfig(BaseModel):
     full_sync_batch_num: Union[int, str] = 5_000
     # 全量同步文件处理线程数
     full_sync_process_num: Union[int, str] = 128
+    # 全量同步使用的函数
+    full_sync_iter_function: str = "iter_files_with_path_skim"
 
     # 增量同步开关
     increment_sync_strm_enabled: bool = False
