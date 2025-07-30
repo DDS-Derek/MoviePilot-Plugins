@@ -1377,3 +1377,9 @@ class TransferStrmHelper:
                 strm_target_path=strm_target_path,
                 mediainfo=mediainfo,
             )
+
+
+class PanPathStrmHelper:
+    """
+    基于网盘路径的STRM生成方式
+    """
