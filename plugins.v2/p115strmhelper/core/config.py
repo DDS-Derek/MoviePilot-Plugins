@@ -176,6 +176,10 @@ class BaseConfig(BaseModel):
     cloudsaver_username: Optional[str] = None
     # CloudSaver 密码
     cloudsaver_password: Optional[str] = None
+    # Nullbr APP ID
+    nullbr_app_id: Optional[str] = None
+    # Nullbr API KEY
+    nullbr_api_key: Optional[str] = None
 
     # 多端播放同一个文件
     same_playback: bool = False

@@ -12,6 +12,7 @@ from ..core.scrape import media_scrape_metadata
 from ..core.cache import idpathcacher, pantransfercacher, lifeeventcacher
 from ..core.i18n import i18n
 from ..utils.path import PathUtils
+from ..utils.sentry import capture_all_class_exceptions
 from ..db_manager.oper import FileDbHelper
 from ..helper.mediainfo_download import MediaInfoDownloader
 
@@ -29,6 +30,7 @@ from app.chain.storage import StorageChain
 from app.chain.transfer import TransferChain
 
 
+@capture_all_class_exceptions
 class MonitorLife:
     """
     监控115生活事件

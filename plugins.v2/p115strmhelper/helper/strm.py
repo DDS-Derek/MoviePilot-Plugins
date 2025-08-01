@@ -19,6 +19,7 @@ from p115client.tool.iterdir import (
 from ..core.cache import idpathcacher
 from ..core.config import configer
 from ..utils.tree import DirectoryTree
+from ..utils.sentry import sentry_hub
 from ..core.scrape import media_scrape_metadata
 from ..db_manager.oper import FileDbHelper
 from ..utils.path import PathUtils
@@ -404,6 +405,7 @@ class IncrementSyncStrmHelper:
                 str(new_file_path),
             )
         except Exception as e:
+            sentry_hub.capture_exception(e)
             logger.error(
                 "【增量STRM生成】生成 STRM 文件失败: %s  %s",
                 str(new_file_path),
@@ -479,6 +481,7 @@ class IncrementSyncStrmHelper:
                         ),
                     )
             except Exception as e:
+                sentry_hub.capture_exception(e)
                 logger.error(f"【增量STRM生成】增量同步 STRM 文件失败: {e}")
                 return
 
@@ -637,6 +640,7 @@ class FullSyncStrmHelper:
             file_name = file_path.stem + ".strm"
             new_file_path = file_target_dir / file_name
         except Exception as e:
+            sentry_hub.capture_exception(e)
             logger.error(
                 "【全量STRM生成】生成 STRM 文件失败: %s  %s",
                 str(item),
@@ -741,6 +745,7 @@ class FullSyncStrmHelper:
                 )
             return _process_item, path_entry
         except Exception as e:
+            sentry_hub.capture_exception(e)
             logger.error(
                 "【全量STRM生成】生成 STRM 文件失败: %s  %s",
                 str(new_file_path),
@@ -769,6 +774,7 @@ class FullSyncStrmHelper:
                 parent_id = int(self.client.fs_dir_getid(pan_media_dir)["id"])
                 logger.info(f"【全量STRM生成】网盘媒体目录 ID 获取成功: {parent_id}")
             except Exception as e:
+                sentry_hub.capture_exception(e)
                 logger.error(f"【全量STRM生成】网盘媒体目录 ID 获取失败: {e}")
                 return False
 
@@ -819,6 +825,7 @@ class FullSyncStrmHelper:
                                 if item_path:
                                     path_list.append(item_path)
                             except Exception as e:
+                                sentry_hub.capture_exception(e)
                                 logger.error(
                                     f"【全量STRM生成】并发处理出错: {item} - {str(e)}"
                                 )
@@ -834,6 +841,7 @@ class FullSyncStrmHelper:
                 end_time = time.perf_counter()
                 self.elapsed_time += end_time - start_time
             except Exception as e:
+                sentry_hub.capture_exception(e)
                 logger.error(
                     f"【全量STRM生成】全量生成 STRM 文件失败: {e}", exc_info=True
                 )
@@ -853,6 +861,7 @@ class FullSyncStrmHelper:
                             self.__remove_parent_dir(file_path=Path(path))
                             self.remove_unless_strm_count += 1
                     except Exception as e:
+                        sentry_hub.capture_exception(e)
                         logger.error(f"【全量STRM生成】清理无效 STRM 文件失败: {e}")
                 else:
                     logger.warn(
@@ -1020,6 +1029,7 @@ class ShareStrmHelper:
             self.strm_count += 1
             logger.info("【分享STRM生成】生成 STRM 文件成功: %s", str(new_file_path))
         except Exception as e:
+            sentry_hub.capture_exception(e)
             logger.error(
                 "【分享STRM生成】生成 STRM 文件失败: %s  %s",
                 str(new_file_path),
@@ -1212,6 +1222,7 @@ class TransferStrmHelper:
             )
             return True, str(new_file_path)
         except Exception as e:  # noqa: F841
+            sentry_hub.capture_exception(e)
             logger.error(
                 "【监控整理STRM生成】生成 %s 文件失败: %s", str(new_file_path), e
             )
@@ -1348,6 +1359,7 @@ class TransferStrmHelper:
                         download_url=download_url,
                     )
         except Exception as e:
+            sentry_hub.capture_exception(e)
             logger.error(f"【监控整理STRM生成】媒体信息文件下载出现未知错误: {e}")
 
         scrape_metadata = True

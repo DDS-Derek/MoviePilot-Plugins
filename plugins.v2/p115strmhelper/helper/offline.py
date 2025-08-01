@@ -12,8 +12,10 @@ from ..core.config import configer
 from ..core.cache import idpathcacher
 from ..helper.life import MonitorLife
 from ..utils.string import StringUtils
+from ..utils.sentry import capture_all_class_exceptions
 
 
+@capture_all_class_exceptions
 class OfflineDownloadHelper:
     """
     离线下载

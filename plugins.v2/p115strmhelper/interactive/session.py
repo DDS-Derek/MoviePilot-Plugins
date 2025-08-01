@@ -1,5 +1,5 @@
 from dataclasses import dataclass, field
-from typing import Optional, Dict
+from typing import Optional, Dict, List
 
 from .framework.schemas import BaseSession, BaseBusiness
 
@@ -13,6 +13,12 @@ class Business(BaseBusiness):
     search_keyword: Optional[str] = None
 
     search_info: Optional[Dict] = field(default_factory=dict)
+
+    resource_key: Optional[str] = None
+
+    resource_key_list: Optional[List] = None
+
+    resource_info: Optional[Dict] = field(default_factory=dict)
 
 
 @dataclass

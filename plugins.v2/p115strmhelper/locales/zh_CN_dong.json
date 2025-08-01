@@ -20,5 +20,8 @@
     "share_add_success": "【115网盘】砖头入库成功！",
     "share_add_success_2": "{title}（{year}）这块砖搬进去啦",
     "share_add_fail": "【115网盘】哎呀...砖头摔坏了",
-    "share_add_fail_2": "搬砖失败...{e} 要不再试一次？"
+    "share_add_fail_2": "搬砖失败...{e} 要不再试一次？",
+    "media_type_movie": "电影",
+    "media_type_tv": "电视剧",
+    "media_type_collection": "合集"
 }

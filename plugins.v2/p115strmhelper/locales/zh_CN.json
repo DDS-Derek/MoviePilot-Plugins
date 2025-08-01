@@ -20,5 +20,8 @@
     "share_add_success": "【115网盘】转存成功",
     "share_add_success_2": "转存 {title}（{year}）成功",
     "share_add_fail": "【115网盘】转存失败",
-    "share_add_fail_2": "转存失败：{e}"
+    "share_add_fail_2": "转存失败：{e}",
+    "media_type_movie": "电影",
+    "media_type_tv": "电视剧",
+    "media_type_collection": "合集"
 }

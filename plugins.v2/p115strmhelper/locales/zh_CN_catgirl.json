@@ -21,6 +21,9 @@
     "share_add_success_2": "成功帮主人转存 {title}（{year}）啦喵 ~(=^･ω･^=)",
     "share_add_fail": "【115网盘】呜...转存失败了喵",
     "share_add_fail_2": "转存失败喵... {e} 主人要不要再试一次喵？",
+    "media_type_movie": "电影喵",
+    "media_type_tv": "电视剧喵",
+    "media_type_collection": "合集喵",
     "fuck": [
         "5Za1fuS4u+S6uuS7iuWkqeaDs+aRuOaRuOaIkeeahOWktOWQl++8nw==",
         "77yI6Lmt6Lmt77yJ5pyA5Zac5qyi5Li75Lq655qE5ZGz6YGT5LqGfg==",

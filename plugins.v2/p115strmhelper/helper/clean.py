@@ -7,6 +7,7 @@ from p115client.tool.fs_files import iter_fs_files
 from app.log import logger
 
 from ..core.config import configer
+from ..utils.sentry import sentry_hub
 
 
 class Cleaner:
@@ -26,6 +27,7 @@ class Cleaner:
             self.client.recyclebin_clean(password=configer.get_config("password"))
             logger.info("【回收站清理】回收站已清空")
         except Exception as e:
+            sentry_hub.capture_exception(e)
             logger.error(f"【回收站清理】清理回收站运行失败: {e}")
             return
 
@@ -70,5 +72,6 @@ class Cleaner:
                 self.client.fs_delete(id_list)
             logger.info("【最近接收清理】最近接收已清空")
         except Exception as e:
+            sentry_hub.capture_exception(e)
             logger.error(f"【最近接收清理】清理最近接收运行失败: {e}")
             return

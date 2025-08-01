@@ -87,12 +87,33 @@ class ActionHandler(BaseActionHandler):
         search_keyword = action.value.strip()
         session.business.search_keyword = search_keyword
 
+    @command_registry.command(name="resource", code="rs")
+    def handle_resource(self, session: Session, action: Action):
+        """
+        处理资源操作
+        """
+        if action.value is None:
+            raise ValueError("搜索关键词不能为空。")
+        resource_key = action.value
+        session.business.resource_key = resource_key
+        if not configer.get_config("nullbr_app_id") or not configer.get_config(
+            "nullbr_api_key"
+        ):
+            session.business.resource_key = 0
+            session.business.resource_key_list = [
+                {
+                    "name": resource_key,
+                }
+            ]
+        session.view.refresh = True
+        session.go_to("resource_list")
+
     @command_registry.command(name="subscribe", code="sb")
     def handle_select_subscribe(
         self, session: Session, action: Action
     ) -> List[Dict] | None:
         """
-        处理选中种子的操作
+        处理选中资源的操作
         """
         try:
             if action.value is None:
@@ -100,7 +121,7 @@ class ActionHandler(BaseActionHandler):
             # 索引号
             item_index = int(action.value)
             # 全部搜索数据
-            search_data = session.business.search_info.get("data", [])
+            search_data = session.business.resource_info.get("data", [])
 
             if not search_data:
                 raise ValueError("当前没有可用的资源。")

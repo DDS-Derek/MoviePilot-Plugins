@@ -13,8 +13,10 @@ from app.log import logger
 from ..core.config import configer
 from ..utils.http import check_response
 from ..utils.url import Url
+from ..utils.sentry import capture_all_class_exceptions
 
 
+@capture_all_class_exceptions
 class MediaInfoDownloader:
     """
     媒体信息文件下载器

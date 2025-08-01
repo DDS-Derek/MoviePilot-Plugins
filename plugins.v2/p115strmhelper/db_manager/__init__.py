@@ -1,5 +1,5 @@
 from pathlib import Path
-from typing import Any, Generator, List, Optional, Self
+from typing import Any, Generator, List, Optional, Self, Tuple
 
 from sqlalchemy import (
     create_engine,
@@ -21,7 +21,6 @@ from sqlalchemy.orm import (
 
 from ..core.config import configer
 from app.core.config import settings
-from app.db import get_args_db, update_args_db
 from app.log import logger
 
 
@@ -178,6 +177,38 @@ def get_db() -> Generator:
     finally:
         if db:
             db.close()
+
+
+def get_args_db(args: tuple, kwargs: dict) -> Optional[Session]:
+    """
+    从参数中获取数据库Session对象
+    """
+    db = None
+    if args:
+        for arg in args:
+            if isinstance(arg, Session):
+                db = arg
+                break
+    if kwargs:
+        for _, value in kwargs.items():
+            if isinstance(value, Session):
+                db = value
+                break
+    return db
+
+
+def update_args_db(args: tuple, kwargs: dict, db: Session) -> Tuple[tuple, dict]:
+    """
+    更新参数中的数据库Session对象，关键字传参时更新db的值，否则更新第1或第2个参数
+    """
+    if kwargs and "db" in kwargs:
+        kwargs["db"] = db
+    elif args:
+        if args[0] is None:
+            args = (db, *args[1:])
+        else:
+            args = (args[0], db, *args[2:])
+    return args, kwargs
 
 
 def db_update(func):

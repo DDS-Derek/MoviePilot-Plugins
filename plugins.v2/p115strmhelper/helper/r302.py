@@ -18,8 +18,10 @@ from ..core.config import configer
 from ..core.cache import r302cacher
 from ..utils.http import check_response
 from ..utils.url import Url
+from ..utils.sentry import capture_all_class_exceptions
 
 
+@capture_all_class_exceptions
 class Redirect:
     """
     302 跳转模块

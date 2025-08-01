@@ -20,5 +20,8 @@
     "share_add_success": "【115网盘】转存成功！有种就快啲播嚟睇！",
     "share_add_success_2": "正呀！转存咗 {title}（{year}），今晚睇通宵啦！",
     "share_add_fail": "扑街，转存失败！再试过啦老豆！",
-    "share_add_fail_2": "转存失败啦，仆街原因：{e}"
+    "share_add_fail_2": "转存失败啦，仆街原因：{e}",
+    "media_type_movie": "电影",
+    "media_type_tv": "电视剧",
+    "media_type_collection": "系列"
 }

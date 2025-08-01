@@ -20,5 +20,8 @@
     "share_add_success": "【115網盤】轉存成功",
     "share_add_success_2": "轉存 {title}（{year}）成功",
     "share_add_fail": "【115網盤】轉存失敗",
-    "share_add_fail_2": "轉存失敗：{e}"
+    "share_add_fail_2": "轉存失敗：{e}",
+    "media_type_movie": "電影",
+    "media_type_tv": "電視劇",
+    "media_type_collection": "合輯"
 }

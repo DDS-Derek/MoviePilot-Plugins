@@ -797,10 +797,42 @@
                     </v-col>
                   </v-row>
 
+                  <v-row>
+                    <v-col cols="12" md="4">
+                      <v-text-field v-model="config.nullbr_app_id" label="Nullbr APP ID" hint="Nullbr APP ID"
+                        persistent-hint density="compact" variant="outlined" hide-details="auto"></v-text-field>
+                    </v-col>
+                    <v-col cols="12" md="4">
+                      <v-text-field v-model="config.nullbr_api_key" label="Nullbr API KEY" hint="Nullbr API KEY"
+                        persistent-hint density="compact" variant="outlined" hide-details="auto"></v-text-field>
+                    </v-col>
+                  </v-row>
+
                   <v-alert type="info" variant="tonal" density="compact" class="mt-3 text-caption">
-                    <strong>功能说明:</strong><br>
-                    - TG频道搜索目前通过对接 https://github.com/jiangrui1994/CloudSaver 实现。<br>
-                    - 需要配置完成 CloudSaver 地址，用户名与密码方可使用 Telegram 频道搜索功能。<br>
+                    <strong>Telegram频道搜索功能说明</strong><br><br>
+
+                    <strong>🔧 实现方式</strong><br>
+                    本功能通过对接以下两个服务平台实现：<br>
+                    1. CloudSaver (<a href="https://github.com/jiangrui1994/CloudSaver"
+                      target="_blank">https://github.com/jiangrui1994/CloudSaver</a>)<br>
+                    2. Nullbr (<a href="https://nullbr.online/" target="_blank">https://nullbr.online/</a>)<br><br>
+
+                    <strong>⚙️ 配置要求</strong><br>
+                    您需要至少完成其中一个平台的配置才能使用搜索功能：<br><br>
+
+                    <strong>CloudSaver配置：</strong><br>
+                    - 服务地址<br>
+                    - 用户名<br>
+                    - 密码<br><br>
+
+                    <strong>Nullbr配置：</strong><br>
+                    - 需要从官网申请 APP ID<br>
+                    - 需要从官网申请 API Key<br><br>
+
+                    <strong>💡 使用建议</strong><br>
+                    - 可以同时配置两个平台<br>
+                    - 如果两者都配置，系统会优先显示Nullbr的资源结果<br>
+                    - 配置越多，可搜索的资源范围越广
                   </v-alert>
                 </v-card-text>
               </v-window-item>
@@ -1088,6 +1120,8 @@ const config = reactive({
   cloudsaver_url: '',
   cloudsaver_username: '',
   cloudsaver_password: '',
+  nullbr_app_id: '',
+  nullbr_api_key: '',
   same_playback: false
 });
 

@@ -19,12 +19,14 @@ from .core.config import configer
 from .core.cache import idpathcacher
 from .core.message import post_message
 from .core.i18n import i18n
+from .utils.sentry import capture_all_class_exceptions
 
 from app.log import logger
 from app.helper.mediaserver import MediaServerHelper
 from app.schemas import NotificationType
 
 
+@capture_all_class_exceptions
 class Api:
     """
     插件 API

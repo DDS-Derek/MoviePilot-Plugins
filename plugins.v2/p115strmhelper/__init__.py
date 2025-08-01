@@ -32,12 +32,14 @@ from .interactive.session import Session
 from .interactive.views import ViewRenderer
 from .helper.strm import FullSyncStrmHelper, TransferStrmHelper
 from .utils.path import PathUtils
+from .utils.sentry import capture_all_class_exceptions
 
 
 # 实例化一个该插件专用的 SessionManager
 session_manager = BaseSessionManager(session_class=Session)
 
 
+@capture_all_class_exceptions
 class P115StrmHelper(_PluginBase):
     # 插件名称
     plugin_name = "115网盘STRM助手"
@@ -46,7 +48,7 @@ class P115StrmHelper(_PluginBase):
     # 插件图标
     plugin_icon = "https://raw.githubusercontent.com/jxxghp/MoviePilot-Frontend/refs/heads/v2/src/assets/images/misc/u115.png"
     # 插件版本
-    plugin_version = "1.9.14"
+    plugin_version = "2.0.0"
     # 插件作者
     plugin_author = "DDSRem"
     # 作者主页
@@ -632,17 +634,27 @@ class P115StrmHelper(_PluginBase):
             )
 
             search_keyword = args.strip()
-            action = Action(command="search", view="search_list", value=search_keyword)
+
+            if configer.get_config("nullbr_app_id") and configer.get_config(
+                "nullbr_api_key"
+            ):
+                command = "search"
+                view = "search_list"
+            else:
+                command = "resource"
+                view = "resource_list"
+
+            action = Action(command=command, view=view, value=search_keyword)
 
             immediate_messages = self.action_handler.process(session, action)
             # 报错，截断后续运行
             if immediate_messages:
                 for msg in immediate_messages:
                     self.__send_message(session, text=msg.get("text"), title="错误")
-                    return
+                return
 
-            # 设置页面为search_list
-            session.go_to("search_list")
+            # 设置页面
+            session.go_to(view)
             self._render_and_send(session)
         except Exception as e:
             logger.error(f"处理 search 命令失败: {e}", exc_info=True)

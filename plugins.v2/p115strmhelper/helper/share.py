@@ -14,8 +14,10 @@ from ..core.config import configer
 from ..core.message import post_message
 from ..core.cache import idpathcacher
 from ..core.i18n import i18n
+from ..utils.sentry import capture_all_class_exceptions
 
 
+@capture_all_class_exceptions
 class ShareTransferHelper:
     """
     分享链接转存
