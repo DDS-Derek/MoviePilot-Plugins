@@ -2,4 +2,4 @@ p123client==0.0.8.8
 #142
 python-http_request>=0.0.10
 http_response>=0.0.6
-httpx-request==0.1.4
+httpx-request==0.1.7
