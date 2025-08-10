@@ -1,4 +1,4 @@
-p123client==0.0.8.8
+p123client==0.0.9.1
 #142
 python-http_request>=0.0.10
 http_response>=0.0.6
