@@ -82,7 +82,7 @@ jobs:
       - name: Log detected plugins
         run: |
           echo "检测到需要发布的插件，将启动构建和发布任务..."
-          echo "插件列表: ${{ needs.detect-changes.outputs.matrix }}"
+          echo '插件列表: ${{ needs.detect-changes.outputs.matrix }}'
 
   # 开始构建和发布
   build-and-release:
