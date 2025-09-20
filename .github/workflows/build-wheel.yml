@@ -171,7 +171,7 @@ jobs:
 
       # 步骤3：下载所有构建任务上传的产物
       - name: 下载所有 Wheels 产物
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v5
         with:
           path: temp-wheels
 
