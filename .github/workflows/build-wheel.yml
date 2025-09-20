@@ -130,7 +130,7 @@ jobs:
 
       # 步骤5：使用 cibuildwheel 构建 wheel 文件
       - name: 构建 Wheel
-        uses: pypa/cibuildwheel@v2.19.1
+        uses: pypa/cibuildwheel@v3.1.4
         env:
           # 从上一步 'vars' 的输出中获取 Python 版本
           CIBW_BUILD: ${{ steps.vars.outputs.cibw_build_version }}
