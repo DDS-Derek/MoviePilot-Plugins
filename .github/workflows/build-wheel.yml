@@ -120,7 +120,7 @@ jobs:
     steps:
       # 步骤1：检出代码库
       - name: 检出代码
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       # 步骤2：下载并解压源码包
       - name: 下载并解压源码包
@@ -177,7 +177,7 @@ jobs:
       fail-fast: false
       matrix: ${{ fromJSON(needs.prepare_alpine_matrix.outputs.matrix) }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - name: 下载并解压源码包
         shell: bash
         run: |
@@ -212,7 +212,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: 检出代码
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: 确定最终提交目录
         id: set_path
