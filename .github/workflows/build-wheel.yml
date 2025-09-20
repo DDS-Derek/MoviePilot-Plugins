@@ -186,7 +186,7 @@ jobs:
       - name: 设置 QEMU
         uses: docker/setup-qemu-action@v3
       - name: 构建 musllinux Wheel
-        uses: pypa/cibuildwheel@v2.19.1
+        uses: pypa/cibuildwheel@v2.23.3
         env:
           CIBW_MANYLINUX_X86_64_IMAGE: 'pypa/musllinux_x86_64'
           CIBW_MANYLINUX_AARCH64_IMAGE: 'pypa/musllinux_aarch64'
