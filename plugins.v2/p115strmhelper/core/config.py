@@ -274,12 +274,17 @@ class ConfigManager(BaseModel):
     # 媒体信息文件下载黑名单
     mediainfo_download_blacklist: Optional[List] = None
 
-    # WebDAV 配置
-    webdav_enabled: bool = False
-    webdav_port: int = 8080
+    # WebDAV 开关
+    webdav_enabled: bool = True
+    # WebDav 端口
+    webdav_port: int = 4949
+    # WebDav 监听地址
     webdav_host: str = "0.0.0.0"
-    webdav_local_mapping_path: Optional[str] = None
+    # 本地元数据目录
+    webdav_local_mapping_path: Optional[str] = "/config/test"
+    # WebDAV 用户名
     webdav_username: Optional[str] = None
+    # WebDAV 密码
     webdav_password: Optional[str] = None
 
     @property

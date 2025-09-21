@@ -45,6 +45,7 @@ from .schemas.u115 import (
 )
 from .schemas.plugin import PluginStatusData
 from .schemas.base import ApiResponse
+from .schemas.webdav import WebDavApi
 from .utils.sentry import sentry_manager
 from .utils.oopserver import OOPServerHelper
 from .helper.webdav import webdav_service
@@ -849,57 +850,57 @@ class Api:
         return OOPServerHelper.check_feature(name)
 
     @staticmethod
-    def get_webdav_status_api() -> ApiResponse[dict]:
+    def get_webdav_status_api() -> WebDavApi:
         """
         获取WebDAV服务状态
         """
         status = webdav_service.get_status()
-        return ApiResponse(data=status, msg="获取WebDAV状态成功")
+        return WebDavApi(data=status, msg="获取WebDAV状态成功")
 
     @staticmethod
-    def start_webdav_service_api() -> ApiResponse[dict]:
+    def start_webdav_service_api() -> WebDavApi:
         """
         启动WebDAV服务
         """
         if webdav_service.start():
-            return ApiResponse(
+            return WebDavApi(
                 data=webdav_service.get_status(),
                 msg="WebDAV服务启动成功"
             )
         else:
-            return ApiResponse(
+            return WebDavApi(
                 code=-1,
                 msg="WebDAV服务启动失败"
             )
 
     @staticmethod
-    def stop_webdav_service_api() -> ApiResponse[dict]:
+    def stop_webdav_service_api() -> WebDavApi:
         """
         停止WebDAV服务
         """
         if webdav_service.stop():
-            return ApiResponse(
+            return WebDavApi(
                 data=webdav_service.get_status(),
                 msg="WebDAV服务停止成功"
             )
         else:
-            return ApiResponse(
+            return WebDavApi(
                 code=-1,
                 msg="WebDAV服务停止失败"
             )
 
     @staticmethod
-    def restart_webdav_service_api() -> ApiResponse[dict]:
+    def restart_webdav_service_api() -> WebDavApi:
         """
         重启WebDAV服务
         """
         if webdav_service.restart():
-            return ApiResponse(
+            return WebDavApi(
                 data=webdav_service.get_status(),
                 msg="WebDAV服务重启成功"
             )
         else:
-            return ApiResponse(
+            return WebDavApi(
                 code=-1,
                 msg="WebDAV服务重启失败"
             )

@@ -33,7 +33,6 @@ from .interactive.handler import ActionHandler
 from .interactive.session import Session
 from .interactive.views import ViewRenderer
 from .helper.strm import FullSyncStrmHelper, TransferStrmHelper
-from .helper.webdav import webdav_service
 from .utils.path import PathUtils
 from .utils.sentry import sentry_manager
 
@@ -141,10 +140,6 @@ class P115StrmHelper(_PluginBase):
             servicer.start_directory_upload()
 
             servicer.start_monitor_life()
-
-            # 启动WebDAV服务
-            if configer.webdav_enabled:
-                webdav_service.start()
 
     @logs_oper("初始化数据库")
     def init_database(self) -> bool:
@@ -1014,9 +1009,6 @@ class P115StrmHelper(_PluginBase):
         servicer.stop()
         ct_db_manager.close_database()
         U115Patcher().disable()
-        
-        # 停止WebDAV服务
-        webdav_service.stop()
 
     async def _save_config_api(self, request: Request) -> Dict:
         """

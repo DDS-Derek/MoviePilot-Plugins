@@ -1,15 +1,35 @@
 import os
-import threading
-import time
+import signal
+from socket import socket, AF_INET, SOCK_STREAM
+from time import sleep
 from pathlib import Path
 from typing import Optional
 
-from wsgiref.simple_server import make_server, WSGIServer
-from wsgidav.wsgidav_app import WsgiDAVApp
+from multiprocessing import Process
+from waitress import serve
 
 from app.log import logger
+
+from .app import create_hybrid_webdav_app
 from ...core.config import configer
-from .hybrid_app import create_hybrid_webdav_app
+from ...schemas.webdav import WebDAVStatus
+
+
+def run_server_process(host, port, local_path_str):
+    """
+    这个函数将在一个独立的子进程中运行
+    """
+    try:
+        logger.info(f"[WebDAV-Process pid={os.getpid()}] Starting...")
+        app = create_hybrid_webdav_app(local_path_str)
+        serve(app, host=host, port=port, threads=16)
+    except KeyboardInterrupt:
+        logger.info(f"[WebDAV-Process pid={os.getpid()}] Received stop signal.")
+    except Exception as e:
+        logger.error(
+            f"[WebDAV-Process pid={os.getpid()}] Server crashed: {e}", exc_info=True
+        )
+        raise
 
 
 class WebDAVService:
@@ -18,70 +38,111 @@ class WebDAVService:
     """
 
     def __init__(self):
-        self.server: Optional[WSGIServer] = None
-        self.server_thread: Optional[threading.Thread] = None
+        self.server_process: Optional[Process] = None
         self.is_running = False
 
     def start(self) -> bool:
         """
-        启动WebDAV服务
+        在一个新的子进程中启动WebDAV服务
         """
+        if self.is_running:
+            logger.info("【WebDAV】服务已在运行中")
+            return True
+
         if not configer.webdav_enabled:
             logger.info("【WebDAV】服务未启用")
             return False
-
         if not configer.webdav_local_mapping_path:
             logger.error("【WebDAV】未配置本地映射路径")
             return False
-
-        # 确保本地映射目录存在
+        if WebDAVService._is_port_in_use():
+            logger.error(f"【WebDAV】端口 {configer.webdav_port} 已被占用")
+            return False
         local_path = Path(configer.webdav_local_mapping_path)
-        local_path.mkdir(parents=True, exist_ok=True)
-
         try:
-            # 创建WebDAV应用
-            app = create_hybrid_webdav_app(str(local_path))
-
-            # 创建服务器
-            self.server = make_server(
-                configer.webdav_host, configer.webdav_port, app, server_class=WSGIServer
-            )
-
-            # 启动服务器线程
-            self.server_thread = threading.Thread(
-                target=self._run_server, daemon=True, name="WebDAV-Server"
-            )
-            self.server_thread.start()
-
-            self.is_running = True
-            logger.info(
-                f"【WebDAV】服务已启动: http://{configer.webdav_host}:{configer.webdav_port}"
-            )
-            return True
-
+            local_path.mkdir(parents=True, exist_ok=True)
+            if not os.access(local_path, os.R_OK | os.W_OK):
+                logger.error(f"【WebDAV】本地映射目录权限不足: {local_path}")
+                return False
         except Exception as e:
-            logger.error(f"【WebDAV】启动失败: {e}")
+            logger.error(f"【WebDAV】创建本地映射目录失败: {e}")
             return False
 
-    def stop(self) -> bool:
-        """
-        停止WebDAV服务
-        """
-        if not self.is_running or not self.server:
-            return True
-
         try:
-            self.server.shutdown()
-            if self.server_thread and self.server_thread.is_alive():
-                self.server_thread.join(timeout=5)
+            self.server_process = Process(
+                target=run_server_process,
+                args=(
+                    configer.webdav_host,
+                    configer.webdav_port,
+                    str(local_path),
+                ),
+                daemon=True,
+                name="WebDAV-Server-Process",
+            )
+            self.server_process.start()
 
+            sleep(2)
+
+            if self.server_process.is_alive() and WebDAVService._is_port_in_use():
+                self.is_running = True
+                logger.info(
+                    f"【WebDAV】服务已在子进程 (PID: {self.server_process.pid}) 中启动: http://{configer.webdav_host}:{configer.webdav_port}"
+                )
+                return True
+            else:
+                logger.error("【WebDAV】服务启动失败或子进程立即退出")
+                if self.server_process.is_alive():
+                    self.server_process.terminate()
+                self.server_process = None
+                return False
+
+        except Exception as e:
+            logger.error(f"【WebDAV】启动失败: {e}", exc_info=True)
+            return False
+
+    def stop(self, force=False) -> bool:
+        """
+        停止WebDAV服务子进程
+        """
+        if not self.is_running or not self.server_process:
             self.is_running = False
-            logger.info("【WebDAV】服务已停止")
             return True
 
+        logger.info(f"【WebDAV】正在停止服务进程 (PID: {self.server_process.pid})...")
+        try:
+            if not self.server_process.is_alive():
+                logger.warning("【WebDAV】服务器进程已经不存在")
+                self.is_running = False
+                self.server_process = None
+                return True
+
+            if not force:
+                self.server_process.terminate()
+                self.server_process.join(timeout=5)
+
+            if force or self.server_process.is_alive():
+                logger.warning(
+                    "【WebDAV】服务器进程未能在5秒内终止，现在强制杀死 (SIGKILL)..."
+                )
+                try:
+                    os.kill(self.server_process.pid, signal.SIGKILL)
+                except ProcessLookupError:
+                    pass
+                self.server_process.join(timeout=2)
+
+            if self.server_process.is_alive():
+                logger.error("【WebDAV】无法终止服务器进程！")
+            else:
+                logger.info("【WebDAV】服务已成功停止")
+
+            return not self.server_process.is_alive()
+
         except Exception as e:
-            logger.error(f"【WebDAV】停止失败: {e}")
+            logger.error(f"【WebDAV】停止服务时发生错误: {e}", exc_info=True)
             return False
+        finally:
+            self.is_running = False
+            self.server_process = None
 
     def restart(self) -> bool:
         """
@@ -89,34 +150,42 @@ class WebDAVService:
         """
         logger.info("【WebDAV】正在重启服务...")
         self.stop()
-        time.sleep(1)
+        sleep(2)
         return self.start()
 
-    def _run_server(self):
+    @staticmethod
+    def _is_port_in_use() -> bool:
         """
-        运行服务器
+        检查端口是否被占用
         """
         try:
-            self.server.serve_forever()
-        except Exception as e:
-            logger.error(f"【WebDAV】服务器运行错误: {e}")
-            self.is_running = False
+            sock = socket(AF_INET, SOCK_STREAM)
+            result = sock.connect_ex((configer.webdav_host, configer.webdav_port))
+            sock.close()
+            return result == 0
+        except Exception:
+            return False
 
-    def get_status(self) -> dict:
+    def get_status(self) -> WebDAVStatus:
         """
         获取服务状态
         """
-        return {
-            "enabled": configer.webdav_enabled,
-            "running": self.is_running,
-            "host": configer.webdav_host,
-            "port": configer.webdav_port,
-            "local_mapping_path": configer.webdav_local_mapping_path,
-            "url": f"http://{configer.webdav_host}:{configer.webdav_port}"
+        return WebDAVStatus(
+            enabled=configer.webdav_enabled,
+            running=self.is_running,
+            host=configer.webdav_host,
+            port=configer.webdav_port,
+            local_mapping_path=configer.webdav_local_mapping_path,
+            url=f"http://{configer.webdav_host}:{configer.webdav_port}"
             if self.is_running
             else None,
-        }
+            auth_enabled=bool(configer.webdav_username and configer.webdav_password),
+            username=configer.webdav_username if configer.webdav_username else None,
+            process_alive=(
+                self.server_process.is_alive() if self.server_process else False
+            ),
+            pid=self.server_process.pid if self.server_process else None,
+        )
 
 
-# 全局WebDAV服务实例
 webdav_service = WebDAVService()
