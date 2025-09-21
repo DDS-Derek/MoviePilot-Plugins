@@ -345,3 +345,51 @@ class FileDbHelper(DbOper):
             return False
 
         return True
+
+    def get_webdav_children(self, parent_id: int) -> Dict:
+        """
+        获取WebDAV子项（文件夹和文件）
+        """
+        files = File.get_by_parent_id(self._db, parent_id)
+        subfolders = Folder.get_by_parent_id(self._db, parent_id)
+
+        def clean_record(record):
+            d = record.__dict__
+            d.pop("_sa_instance_state", None)
+            d["type"] = "file" if isinstance(record, File) else "folder"
+            return d
+
+        return {
+            "files": [clean_record(f) for f in files],
+            "subfolders": [clean_record(sf) for sf in subfolders],
+            "meta": {
+                "parent_id": parent_id,
+                "total_count": len(files) + len(subfolders),
+            },
+        }
+
+    def get_webdav_folder_by_id(self, folder_id: int) -> Optional[Dict]:
+        """
+        通过ID获取WebDAV文件夹信息
+        """
+        folder = Folder.get_by_id(self._db, folder_id)
+        if not folder:
+            return None
+        
+        d = folder.__dict__
+        d.pop("_sa_instance_state", None)
+        d["type"] = "folder"
+        return d
+
+    def get_webdav_file_by_id(self, file_id: int) -> Optional[Dict]:
+        """
+        通过ID获取WebDAV文件信息
+        """
+        file = File.get_by_id(self._db, file_id)
+        if not file:
+            return None
+        
+        d = file.__dict__
+        d.pop("_sa_instance_state", None)
+        d["type"] = "file"
+        return d

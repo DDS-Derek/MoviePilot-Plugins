@@ -271,6 +271,14 @@ class ConfigManager(BaseModel):
     # 媒体信息文件下载黑名单
     mediainfo_download_blacklist: Optional[List] = None
 
+    # WebDAV 配置
+    webdav_enabled: bool = False
+    webdav_port: int = 8080
+    webdav_host: str = "0.0.0.0"
+    webdav_local_mapping_path: Optional[str] = None
+    webdav_username: Optional[str] = None
+    webdav_password: Optional[str] = None
+
     @property
     def PLUGIN_ALIGO_PATH(self) -> Path:
         """

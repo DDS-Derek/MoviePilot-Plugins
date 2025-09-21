@@ -21,6 +21,7 @@ from .core.cache import idpathcacher
 from .core.message import post_message
 from .core.i18n import i18n
 from .core.aliyunpan import AliyunPanLogin
+from .helper.webdav import webdav_service
 from .utils.sentry import sentry_manager
 from .utils.oopserver import OOPServerHelper
 
@@ -849,3 +850,69 @@ class Api:
         判断是否有权限使用此增强功能
         """
         return OOPServerHelper.check_feature(name)
+
+    @staticmethod
+    def get_webdav_status_api() -> Dict:
+        """
+        获取WebDAV服务状态
+        """
+        status = webdav_service.get_status()
+        return {
+            "code": 0,
+            "msg": "获取WebDAV状态成功",
+            "data": status
+        }
+
+    @staticmethod
+    def start_webdav_service_api() -> Dict:
+        """
+        启动WebDAV服务
+        """
+        if webdav_service.start():
+            return {
+                "code": 0,
+                "msg": "WebDAV服务启动成功",
+                "data": webdav_service.get_status()
+            }
+        else:
+            return {
+                "code": -1,
+                "msg": "WebDAV服务启动失败",
+                "data": None
+            }
+
+    @staticmethod
+    def stop_webdav_service_api() -> Dict:
+        """
+        停止WebDAV服务
+        """
+        if webdav_service.stop():
+            return {
+                "code": 0,
+                "msg": "WebDAV服务停止成功",
+                "data": webdav_service.get_status()
+            }
+        else:
+            return {
+                "code": -1,
+                "msg": "WebDAV服务停止失败",
+                "data": None
+            }
+
+    @staticmethod
+    def restart_webdav_service_api() -> Dict:
+        """
+        重启WebDAV服务
+        """
+        if webdav_service.restart():
+            return {
+                "code": 0,
+                "msg": "WebDAV服务重启成功",
+                "data": webdav_service.get_status()
+            }
+        else:
+            return {
+                "code": -1,
+                "msg": "WebDAV服务重启失败",
+                "data": None
+            }
