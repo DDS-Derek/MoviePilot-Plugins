@@ -2,9 +2,10 @@ import time
 import base64
 from typing import Any, Optional, Dict
 
-import requests
+import httpx
 
 from ..core.config import configer
+from ..schemas.machineid import MachineIDFeature
 
 
 class OOPServerRequest:
@@ -29,7 +30,7 @@ class OOPServerRequest:
 
         self.max_retries = max_retries
         self.backoff_factor = backoff_factor
-        self.session = requests.Session()
+        self.session = httpx.Client(follow_redirects=True)
 
         self.session.headers.update(
             {
@@ -65,7 +66,7 @@ class OOPServerRequest:
         headers: Optional[Dict[str, str]] = None,
         json_data: Optional[Dict[str, Any]] = None,
         timeout: float = 10.0,
-    ) -> Optional[requests.Response]:
+    ) -> Optional[httpx.Response]:
         """
         执行安全请求
 
@@ -95,17 +96,14 @@ class OOPServerRequest:
             try:
                 response = self.session.request(method, full_url, **kwargs)
 
-                if response.status_code >= 400:
-                    raise requests.exceptions.HTTPError(
-                        f"HTTP error occurred: {response.status_code} - {response.reason}"
-                    )
+                response.raise_for_status()
 
                 return response
 
-            except requests.exceptions.RequestException as e:
+            except httpx.RequestError as e:
                 last_exception = e
                 if attempt < self.max_retries - 1:
-                    sleep_time = self.backoff_factor * (2**attempt)
+                    sleep_time = self.backoff_factor * (2 ** attempt)
                     time.sleep(sleep_time)
 
         if last_exception:
@@ -119,16 +117,16 @@ class OOPServerHelper:
     """
 
     @staticmethod
-    def check_feature(name: str = "") -> Dict:
+    def check_feature(name: str = "") -> MachineIDFeature:
         """
         判断是否有权限使用此增强功能
         """
         if not name:
-            return {
-                "machine_id": "",
-                "feature_name": "",
-                "enabled": False,
-            }
+            return MachineIDFeature(
+                machine_id=None,
+                feature_name=None,
+                enabled=False,
+            )
 
         try:
             oopserver = OOPServerRequest()
@@ -140,15 +138,15 @@ class OOPServerHelper:
                 timeout=10.0,
             )
             if resp is not None and resp.status_code == 200:
-                return resp.json()
-            return {
-                "machine_id": machine_id,
-                "feature_name": name,
-                "enabled": False,
-            }
+                return MachineIDFeature(**resp.json())
+            return MachineIDFeature(
+                machine_id=machine_id,
+                feature_name=name,
+                enabled=False,
+            )
         except Exception:
-            return {
-                "machine_id": "",
-                "feature_name": name,
-                "enabled": False,
-            }
+            return MachineIDFeature(
+                machine_id=None,
+                feature_name=name,
+                enabled=False,
+            )

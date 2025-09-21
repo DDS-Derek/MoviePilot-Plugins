@@ -116,7 +116,7 @@ class U115Patcher:
 
         if configer.transfer_module_enhancement and OOPServerHelper.check_feature(
             "transfer_module_enhancement"
-        ).get("enabled", False):
+        ).enabled:
             modules = ["create_folder", "get_item", "get_folder", "rename"]
             for module in modules:
                 if cls._func_active.get(module):

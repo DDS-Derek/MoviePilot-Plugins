@@ -21,6 +21,7 @@ from ..utils.exception import (
     U115NoCheckInException,
     CanNotFindPathToCid,
     PanDataNotInDb,
+    FileItemKeyMiss,
 )
 
 
@@ -106,8 +107,10 @@ class SentryManager:
             {"type": PanDataNotInDb, "message": "无法找到路径"},
             {"type": CanNotFindPathToCid, "message": "无法找到路径"},
             {"type": PanPathNotFound, "message": "网盘路径不存在"},
+            {"type": FileItemKeyMiss},
             {"type": OSError, "message": "File name too long"},
             {"type": OSError, "message": "Read-only file system"},
+            {"type": OSError, "message": "Stale file handle"},
             {"type": PermissionError, "message": "Permission denied"},
         ]
 

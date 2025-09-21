@@ -1,4 +1,3 @@
-import shutil
 from typing import List, Optional, Any
 from pathlib import Path
 
@@ -12,10 +11,9 @@ from app.db.transferhistory_oper import TransferHistoryOper
 from app.db.downloadhistory_oper import DownloadHistoryOper
 from app.db.plugindata_oper import PluginDataOper
 from app.helper.downloader import DownloaderHelper
-from app.utils.system import SystemUtils
 
 from ..core.plunins import PluginChian
-from ..utils.path import PathUtils
+from ..utils.path import PathUtils, PathRemoveUtils
 
 
 class TransferHBOper(DbOper):
@@ -81,27 +79,6 @@ class MediaSyncDelHelper:
             plugin_id = self.__class__.__name__
         return self.plugindata.del_data(plugin_id, key)
 
-    @staticmethod
-    def remove_parent_dir(file_path: Path):
-        """
-        删除父目录
-        """
-        # 删除空目录
-        # 判断当前媒体父路径下是否有媒体文件，如有则无需遍历父级
-        if not SystemUtils.exits_files(file_path.parent, settings.RMT_MEDIAEXT):
-            # 判断父目录是否为空, 为空则删除
-            i = 0
-            for parent_path in file_path.parents:
-                i += 1
-                if i > 3:
-                    break
-                if str(parent_path.parent) != str(file_path.root):
-                    # 父目录非根目录，才删除父目录
-                    if not SystemUtils.exits_files(parent_path, settings.RMT_MEDIAEXT):
-                        # 当前路径下没有媒体文件则删除
-                        shutil.rmtree(parent_path)
-                        logger.warn(f"【同步删除】本地空目录 {parent_path} 已删除")
-
     def remove_by_path(self, path: str, del_source: bool = False):
         """
         通过路径删除历史记录和源文件
@@ -136,7 +113,11 @@ class MediaSyncDelHelper:
                         logger.info(f"【同步删除】源文件 {transferhis.src} 开始删除")
                         Path(transferhis.src).unlink(missing_ok=True)
                         logger.info(f"【同步删除】源文件 {transferhis.src} 已删除")
-                        MediaSyncDelHelper.remove_parent_dir(Path(transferhis.src))
+                        PathRemoveUtils.remove_parent_dir(
+                            file_path=Path(transferhis.src),
+                            mode=settings.RMT_MEDIAEXT,
+                            func_type="【同步删除】"
+                        )
 
                     if transferhis.download_hash:
                         try:

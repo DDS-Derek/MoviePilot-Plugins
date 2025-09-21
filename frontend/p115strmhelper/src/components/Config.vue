@@ -996,6 +996,10 @@
                             <v-switch v-model="config.upload_module_skip_slow_upload" label="秒传失败直接退出" color="info"
                               density="compact"></v-switch>
                           </v-col>
+                          <v-col cols="12" md="4">
+                            <v-switch v-model="config.upload_module_notify" label="秒传等待发送通知" color="info"
+                              density="compact"></v-switch>
+                          </v-col>
                         </v-row>
                         <v-row>
                           <v-col cols="12" md="6">
@@ -1439,6 +1443,7 @@ const config = reactive({
   error_info_upload: false,
   upload_module_enhancement: false,
   upload_module_skip_slow_upload: false,
+  upload_module_notify: true,
   upload_module_wait_time: 300,
   upload_module_wait_timeout: 3600,
   upload_module_skip_upload_wait_size: 0,
@@ -1459,40 +1464,24 @@ const message = reactive({
 });
 
 const skipUploadWaitSizeFormatted = computed({
-  /**
-   * get: 将字节转换为带单位的字符串显示在输入框中
-   */
   get() {
-    // 如果值是0或无效，返回空字符串，实现清空效果
     if (!config.upload_module_skip_upload_wait_size || config.upload_module_skip_upload_wait_size <= 0) {
       return '';
     }
     return formatBytes(config.upload_module_skip_upload_wait_size);
   },
-  /**
-   * set: 将用户输入的字符串(如 "5M")解析为字节并存储
-   * @param {string} newValue - 用户输入的值
-   */
   set(newValue) {
     config.upload_module_skip_upload_wait_size = parseSize(newValue);
   },
 });
 
 const forceUploadWaitSizeFormatted = computed({
-  /**
-   * get: 将字节转换为带单位的字符串显示在输入框中
-   */
   get() {
-    // 如果值是0或无效，返回空字符串，实现清空效果
     if (!config.upload_module_force_upload_wait_size || config.upload_module_force_upload_wait_size <= 0) {
       return '';
     }
     return formatBytes(config.upload_module_force_upload_wait_size);
   },
-  /**
-   * set: 将用户输入的字符串(如 "5M")解析为字节并存储
-   * @param {string} newValue - 用户输入的值
-   */
   set(newValue) {
     config.upload_module_force_upload_wait_size = parseSize(newValue);
   },
@@ -1536,38 +1525,27 @@ const monitorLifeMinFileSizeFormatted = computed({
 
 const parseSize = (sizeString) => {
   if (!sizeString || typeof sizeString !== 'string') return 0;
-
   const regex = /^(\d*\.?\d+)\s*(k|m|g|t)?b?$/i;
   const match = sizeString.trim().match(regex);
-
   if (!match) return 0;
-
   const num = parseFloat(match[1]);
   const unit = (match[2] || '').toLowerCase();
-
   switch (unit) {
-    case 't':
-      return Math.round(num * 1024 * 1024 * 1024 * 1024);
-    case 'g':
-      return Math.round(num * 1024 * 1024 * 1024);
-    case 'm':
-      return Math.round(num * 1024 * 1024);
-    case 'k':
-      return Math.round(num * 1024);
-    default:
-      return Math.round(num);
+    case 't': return Math.round(num * 1024 * 1024 * 1024 * 1024);
+    case 'g': return Math.round(num * 1024 * 1024 * 1024);
+    case 'm': return Math.round(num * 1024 * 1024);
+    case 'k': return Math.round(num * 1024);
+    default: return Math.round(num);
   }
 };
 
 const formatBytes = (bytes, decimals = 2) => {
   if (!+bytes) return '0 B';
-
   const k = 1024;
   const dm = decimals < 0 ? 0 : decimals;
   const sizes = ['B', 'K', 'M', 'G', 'T'];
   const i = Math.floor(Math.log(bytes) / Math.log(k));
   const formattedNum = parseFloat((bytes / Math.pow(k, i)).toFixed(dm));
-
   return `${formattedNum} ${sizes[i]}`;
 };
 
@@ -1631,7 +1609,7 @@ const qrDialog = reactive({
   qrcode: '',
   uid: '',
   time: "",
-  sgin: "",
+  sign: "",
   tips: '请使用支付宝扫描二维码登录',
   status: '等待扫码',
   checkInterval: null,
@@ -1661,20 +1639,17 @@ const aliQrDialog = reactive({
   checkIntervalId: null,
 });
 
-// 监视config中的路径配置，同步到可视化组件
 watch(() => config.transfer_monitor_paths, (newVal) => {
   if (!newVal) {
     transferPaths.value = [{ local: '', remote: '' }];
     return;
   }
-
   try {
     const paths = newVal.split('\n').filter(line => line.trim());
     transferPaths.value = paths.map(path => {
       const parts = path.split('#');
       return { local: parts[0] || '', remote: parts[1] || '' };
     });
-
     if (transferPaths.value.length === 0) {
       transferPaths.value = [{ local: '', remote: '' }];
     }
@@ -1689,14 +1664,12 @@ watch(() => config.transfer_mp_mediaserver_paths, (newVal) => {
     transferMpPaths.value = [{ local: '', remote: '' }];
     return;
   }
-
   try {
     const paths = newVal.split('\n').filter(line => line.trim());
     transferMpPaths.value = paths.map(path => {
       const parts = path.split('#');
       return { local: parts[0] || '', remote: parts[1] || '' };
     });
-
     if (transferMpPaths.value.length === 0) {
       transferMpPaths.value = [{ local: '', remote: '' }];
     }
@@ -1711,14 +1684,12 @@ watch(() => config.full_sync_strm_paths, (newVal) => {
     fullSyncPaths.value = [{ local: '', remote: '' }];
     return;
   }
-
   try {
     const paths = newVal.split('\n').filter(line => line.trim());
     fullSyncPaths.value = paths.map(path => {
       const parts = path.split('#');
       return { local: parts[0] || '', remote: parts[1] || '' };
     });
-
     if (fullSyncPaths.value.length === 0) {
       fullSyncPaths.value = [{ local: '', remote: '' }];
     }
@@ -1733,14 +1704,12 @@ watch(() => config.increment_sync_strm_paths, (newVal) => {
     incrementSyncPaths.value = [{ local: '', remote: '' }];
     return;
   }
-
   try {
     const paths = newVal.split('\n').filter(line => line.trim());
     incrementSyncPaths.value = paths.map(path => {
       const parts = path.split('#');
       return { local: parts[0] || '', remote: parts[1] || '' };
     });
-
     if (incrementSyncPaths.value.length === 0) {
       incrementSyncPaths.value = [{ local: '', remote: '' }];
     }
@@ -1755,14 +1724,12 @@ watch(() => config.increment_sync_mp_mediaserver_paths, (newVal) => {
     incrementSyncMPPaths.value = [{ local: '', remote: '' }];
     return;
   }
-
   try {
     const paths = newVal.split('\n').filter(line => line.trim());
     incrementSyncMPPaths.value = paths.map(path => {
       const parts = path.split('#');
       return { local: parts[0] || '', remote: parts[1] || '' };
     });
-
     if (incrementSyncMPPaths.value.length === 0) {
       incrementSyncMPPaths.value = [{ local: '', remote: '' }];
     }
@@ -1777,14 +1744,12 @@ watch(() => config.monitor_life_paths, (newVal) => {
     monitorLifePaths.value = [{ local: '', remote: '' }];
     return;
   }
-
   try {
     const paths = newVal.split('\n').filter(line => line.trim());
     monitorLifePaths.value = paths.map(path => {
       const parts = path.split('#');
       return { local: parts[0] || '', remote: parts[1] || '' };
     });
-
     if (monitorLifePaths.value.length === 0) {
       monitorLifePaths.value = [{ local: '', remote: '' }];
     }
@@ -1799,14 +1764,12 @@ watch(() => config.monitor_life_mp_mediaserver_paths, (newVal) => {
     monitorLifeMpPaths.value = [{ local: '', remote: '' }];
     return;
   }
-
   try {
     const paths = newVal.split('\n').filter(line => line.trim());
     monitorLifeMpPaths.value = paths.map(path => {
       const parts = path.split('#');
       return { local: parts[0] || '', remote: parts[1] || '' };
     });
-
     if (monitorLifeMpPaths.value.length === 0) {
       monitorLifeMpPaths.value = [{ local: '', remote: '' }];
     }
@@ -1821,13 +1784,11 @@ watch(() => config.pan_transfer_paths, (newVal) => {
     panTransferPaths.value = [{ path: '' }];
     return;
   }
-
   try {
     const paths = newVal.split('\n').filter(line => line.trim());
     panTransferPaths.value = paths.map(path => {
       return { path };
     });
-
     if (panTransferPaths.value.length === 0) {
       panTransferPaths.value = [{ path: '' }];
     }
@@ -1837,7 +1798,6 @@ watch(() => config.pan_transfer_paths, (newVal) => {
   }
 }, { immediate: true });
 
-// 新增：监视 exclude_paths 字符串与数组之间的同步
 watch(() => config.transfer_monitor_scrape_metadata_exclude_paths, (newVal) => {
   if (typeof newVal !== 'string' || !newVal.trim()) {
     transferExcludePaths.value = [{ path: '' }];
@@ -1922,7 +1882,6 @@ watch(monitorLifeExcludePaths, (newVal) => {
   }
 }, { deep: true });
 
-// 从路径对象列表生成配置字符串
 const generatePathsConfig = (paths, key) => {
   const configText = paths.map(p => {
     if (key === 'panTransfer') {
@@ -1963,15 +1922,10 @@ const loadConfig = async () => {
     loading.value = true;
     const data = await props.api.get(`plugin/${PLUGIN_ID}/get_config`);
     if (data) {
-      // 更新配置
       Object.assign(config, data);
-
-      // 初始化 directoryUploadPaths
       directoryUploadPaths.value = (Array.isArray(config.directory_upload_path) && config.directory_upload_path.length > 0)
         ? JSON.parse(JSON.stringify(config.directory_upload_path))
         : [{ src: '', dest_remote: '', dest_local: '', delete: false }];
-
-      // 解析TG频道配置
       let parsedChannels = [];
       if (config.tg_search_channels) {
         if (Array.isArray(config.tg_search_channels)) {
@@ -1991,12 +1945,9 @@ const loadConfig = async () => {
       } else {
         tgChannels.value = [{ name: '', id: '' }];
       }
-
-      // 保存媒体服务器列表
       if (data.mediaservers) {
         mediaservers.value = data.mediaservers;
       }
-
       const p115LocalPaths = new Set();
       if (config.transfer_monitor_paths) {
         config.transfer_monitor_paths.split('\n')
@@ -2026,9 +1977,7 @@ const saveConfig = async () => {
   saveLoading.value = true;
   message.text = '';
   message.type = 'info';
-
   try {
-    // 1. 更新配置对象中的路径字符串 (这部分逻辑保持不变)
     config.transfer_monitor_paths = generatePathsConfig(transferPaths.value, 'transfer');
     config.transfer_mp_mediaserver_paths = generatePathsConfig(transferMpPaths.value, 'mp');
     config.full_sync_strm_paths = generatePathsConfig(fullSyncPaths.value, 'fullSync');
@@ -2038,33 +1987,20 @@ const saveConfig = async () => {
     config.monitor_life_mp_mediaserver_paths = generatePathsConfig(monitorLifeMpPaths.value, 'monitorLifeMp');
     config.pan_transfer_paths = generatePathsConfig(panTransferPaths.value, 'panTransfer');
     config.directory_upload_path = directoryUploadPaths.value.filter(p => p.src?.trim() || p.dest_remote?.trim() || p.dest_local?.trim());
-
     const validChannels = tgChannels.value.filter(
       c => c.name && c.name.trim() !== '' && c.id && c.id.trim() !== ''
     );
     config.tg_search_channels = validChannels;
-
-    // 2. 【重要】通过 emit 事件将配置数据发送给 MoviePilot 框架
-    //    使用 JSON.parse(JSON.stringify(...)) 确保传递的是纯对象
     emit('save', JSON.parse(JSON.stringify(config)));
-
-    // 3. (可选) 显示本地的临时反馈信息
     message.text = '配置已发送保存请求，请稍候...';
     message.type = 'info';
-
-    // 注意：不再需要检查后端API的响应，因为保存由框架处理
-    // 注意：也不再需要返回 true/false，因为操作是异步触发的
-
   } catch (err) {
-    // 这个 catch 块现在主要处理 emit 或 generatePathsConfig 可能出现的错误
     console.error('发送保存事件时出错:', err);
     message.text = `发送保存请求时出错: ${err.message || '未知错误'}`;
     message.type = 'error';
   } finally {
     saveLoading.value = false;
-    // 延迟清除临时消息
     setTimeout(() => {
-      // 只清除临时的 'info' 或 'error' 消息
       if (message.type === 'info' || message.type === 'error') {
         message.text = '';
       }
@@ -2089,7 +2025,6 @@ const getMachineId = async () => {
     message.type = 'error';
   }
   setTimeout(() => {
-    // 只清除成功或提示类消息，保留错误消息供用户查看
     if (message.type === 'success' || message.type === 'info') {
       message.text = '';
     }
@@ -2097,39 +2032,20 @@ const getMachineId = async () => {
 };
 
 const handleConfirmFullSync = async () => {
-  fullSyncConfirmDialog.value = false; // 先关闭对话框
-  await triggerFullSync(); // 然后执行原始的同步函数
+  fullSyncConfirmDialog.value = false;
+  await triggerFullSync();
 };
 
-// 触发全量同步
 const triggerFullSync = async () => {
   syncLoading.value = true;
   message.text = '';
-
   try {
-    // 检查插件是否已启用
-    if (!config.enabled) {
-      throw new Error('插件未启用，请先启用插件');
-    }
-
-    // 检查是否已配置Cookie
-    if (!config.cookies || config.cookies.trim() === '') {
-      throw new Error('请先设置115 Cookie');
-    }
-
-    // 同步路径设置到配置对象
+    if (!config.enabled) throw new Error('插件未启用，请先启用插件');
+    if (!config.cookies || config.cookies.trim() === '') throw new Error('请先设置115 Cookie');
     config.full_sync_strm_paths = generatePathsConfig(fullSyncPaths.value, 'fullSync');
+    if (!config.full_sync_strm_paths) throw new Error('请先配置全量同步路径');
 
-    // 检查是否有有效路径配置
-    if (!config.full_sync_strm_paths) {
-      throw new Error('请先配置全量同步路径');
-    }
-
-    // 使用常量PLUGIN_ID
-
-    // 调用API触发全量同步
     const result = await props.api.post(`plugin/${PLUGIN_ID}/full_sync`);
-
     if (result && result.code === 0) {
       message.text = result.msg || '全量同步任务已启动';
       message.type = 'success';
@@ -2145,37 +2061,16 @@ const triggerFullSync = async () => {
   }
 };
 
-// 触发分享同步
 const triggerShareSync = async () => {
   shareSyncLoading.value = true;
   message.text = '';
-
   try {
-    // 检查插件是否已启用
-    if (!config.enabled) {
-      throw new Error('插件未启用，请先启用插件');
-    }
+    if (!config.enabled) throw new Error('插件未启用，请先启用插件');
+    if (!config.cookies || config.cookies.trim() === '') throw new Error('请先设置115 Cookie');
+    if (!config.share_target_path || config.share_target_path.trim() === '') throw new Error('请先配置分享目标路径');
+    if (!config.share_strm_path || config.share_strm_path.trim() === '') throw new Error('请先配置分享STRM路径');
 
-    // 检查是否已配置Cookie
-    if (!config.cookies || config.cookies.trim() === '') {
-      throw new Error('请先设置115 Cookie');
-    }
-
-    // 检查是否配置了分享目标路径
-    if (!config.share_target_path || config.share_target_path.trim() === '') {
-      throw new Error('请先配置分享目标路径');
-    }
-
-    // 检查是否配置了分享STRM路径
-    if (!config.share_strm_path || config.share_strm_path.trim() === '') {
-      throw new Error('请先配置分享STRM路径');
-    }
-
-    // 使用常量PLUGIN_ID
-
-    // 调用API触发分享同步
     const result = await props.api.post(`plugin/${PLUGIN_ID}/share_sync`);
-
     if (result && result.code === 0) {
       message.text = result.msg || '分享同步任务已启动';
       message.type = 'success';
@@ -2191,150 +2086,91 @@ const triggerShareSync = async () => {
   }
 };
 
-// 路径管理方法
 const addPath = (type) => {
   switch (type) {
-    case 'transfer':
-      transferPaths.value.push({ local: '', remote: '' });
-      break;
-    case 'mp':
-      transferMpPaths.value.push({ local: '', remote: '' });
-      break;
-    case 'fullSync':
-      fullSyncPaths.value.push({ local: '', remote: '' });
-      break;
-    case 'incrementSync':
-      incrementSyncPaths.value.push({ local: '', remote: '' });
-      break;
-    case 'increment-mp':
-      incrementSyncMPPaths.value.push({ local: '', remote: '' });
-      break;
-    case 'monitorLife':
-      monitorLifePaths.value.push({ local: '', remote: '' });
-      break;
-    case 'monitorLifeMp':
-      monitorLifeMpPaths.value.push({ local: '', remote: '' });
-      break;
-    case 'directoryUpload':
-      directoryUploadPaths.value.push({ src: '', dest_remote: '', dest_local: '', delete: false });
-      break;
+    case 'transfer': transferPaths.value.push({ local: '', remote: '' }); break;
+    case 'mp': transferMpPaths.value.push({ local: '', remote: '' }); break;
+    case 'fullSync': fullSyncPaths.value.push({ local: '', remote: '' }); break;
+    case 'incrementSync': incrementSyncPaths.value.push({ local: '', remote: '' }); break;
+    case 'increment-mp': incrementSyncMPPaths.value.push({ local: '', remote: '' }); break;
+    case 'monitorLife': monitorLifePaths.value.push({ local: '', remote: '' }); break;
+    case 'monitorLifeMp': monitorLifeMpPaths.value.push({ local: '', remote: '' }); break;
+    case 'directoryUpload': directoryUploadPaths.value.push({ src: '', dest_remote: '', dest_local: '', delete: false }); break;
   }
 };
-
 const removePath = (index, type) => {
   switch (type) {
     case 'transfer':
       transferPaths.value.splice(index, 1);
-      if (transferPaths.value.length === 0) {
-        transferPaths.value = [{ local: '', remote: '' }];
-      }
+      if (transferPaths.value.length === 0) transferPaths.value = [{ local: '', remote: '' }];
       break;
     case 'mp':
       transferMpPaths.value.splice(index, 1);
-      if (transferMpPaths.value.length === 0) {
-        transferMpPaths.value = [{ local: '', remote: '' }];
-      }
+      if (transferMpPaths.value.length === 0) transferMpPaths.value = [{ local: '', remote: '' }];
       break;
     case 'fullSync':
       fullSyncPaths.value.splice(index, 1);
-      if (fullSyncPaths.value.length === 0) {
-        fullSyncPaths.value = [{ local: '', remote: '' }];
-      }
+      if (fullSyncPaths.value.length === 0) fullSyncPaths.value = [{ local: '', remote: '' }];
       break;
     case 'incrementSync':
       incrementSyncPaths.value.splice(index, 1);
-      if (incrementSyncPaths.value.length === 0) {
-        incrementSyncPaths.value = [{ local: '', remote: '' }];
-      }
+      if (incrementSyncPaths.value.length === 0) incrementSyncPaths.value = [{ local: '', remote: '' }];
       break;
     case 'increment-mp':
       incrementSyncMPPaths.value.splice(index, 1);
-      if (incrementSyncMPPaths.value.length === 0) {
-        incrementSyncMPPaths.value = [{ local: '', remote: '' }];
-      }
+      if (incrementSyncMPPaths.value.length === 0) incrementSyncMPPaths.value = [{ local: '', remote: '' }];
       break;
     case 'monitorLife':
       monitorLifePaths.value.splice(index, 1);
-      if (monitorLifePaths.value.length === 0) {
-        monitorLifePaths.value = [{ local: '', remote: '' }];
-      }
+      if (monitorLifePaths.value.length === 0) monitorLifePaths.value = [{ local: '', remote: '' }];
       break;
     case 'monitorLifeMp':
       monitorLifeMpPaths.value.splice(index, 1);
-      if (monitorLifeMpPaths.value.length === 0) {
-        monitorLifeMpPaths.value = [{ local: '', remote: '' }];
-      }
+      if (monitorLifeMpPaths.value.length === 0) monitorLifeMpPaths.value = [{ local: '', remote: '' }];
       break;
     case 'directoryUpload':
       directoryUploadPaths.value.splice(index, 1);
-      if (directoryUploadPaths.value.length === 0) {
-        directoryUploadPaths.value = [{ src: '', dest_remote: '', dest_local: '', delete: false }];
-      }
+      if (directoryUploadPaths.value.length === 0) directoryUploadPaths.value = [{ src: '', dest_remote: '', dest_local: '', delete: false }];
       break;
   }
 };
-
-const addPanTransferPath = () => {
-  panTransferPaths.value.push({ path: '' });
-};
-
+const addPanTransferPath = () => { panTransferPaths.value.push({ path: '' }); };
 const removePanTransferPath = (index) => {
   panTransferPaths.value.splice(index, 1);
-  if (panTransferPaths.value.length === 0) {
-    panTransferPaths.value = [{ path: '' }];
-  }
+  if (panTransferPaths.value.length === 0) panTransferPaths.value = [{ path: '' }];
 };
 
-// 打开导入对话框
 const openImportDialog = () => {
   importDialog.jsonText = '';
   importDialog.error = '';
   importDialog.show = true;
 };
-
-// 关闭导入对话框
 const closeImportDialog = () => {
   importDialog.show = false;
 };
-
-// 处理确认导入的逻辑
 const handleConfirmImport = () => {
-  importDialog.error = ''; // 重置错误信息
+  importDialog.error = '';
   if (!importDialog.jsonText || !importDialog.jsonText.trim()) {
     importDialog.error = '输入内容不能为空。';
     return;
   }
-
   try {
     const parsedData = JSON.parse(importDialog.jsonText);
-
-    // 验证数据结构
-    if (!Array.isArray(parsedData)) {
-      throw new Error("数据必须是一个数组。");
-    }
+    if (!Array.isArray(parsedData)) throw new Error("数据必须是一个数组。");
     const isValidStructure = parsedData.every(
       item => typeof item === 'object' && item !== null && 'name' in item && 'id' in item
     );
-    if (!isValidStructure) {
-      throw new Error("数组中的每个元素都必须是包含 'name' 和 'id' 键的对象。");
-    }
-
-    // 导入成功
-    // 如果导入的是空数组，则显示一个空行；否则直接使用导入的数据
+    if (!isValidStructure) throw new Error("数组中的每个元素都必须是包含 'name' 和 'id' 键的对象。");
     tgChannels.value = parsedData.length > 0 ? parsedData : [{ name: '', id: '' }];
-
     message.text = '频道配置导入成功！';
     message.type = 'success';
     closeImportDialog();
-
   } catch (e) {
-    // 捕获JSON解析或结构验证错误
     importDialog.error = `导入失败: ${e.message}`;
     console.error("频道导入解析失败:", e);
   }
 };
 
-// 目录选择器方法
 const openDirSelector = (index, locationType, pathType, fieldKey = null) => {
   dirDialog.show = true;
   dirDialog.isLocal = locationType === 'local';
@@ -2347,15 +2183,7 @@ const openDirSelector = (index, locationType, pathType, fieldKey = null) => {
   dirDialog.targetConfigKeyForExclusion = null;
   dirDialog.originalPathTypeBackup = '';
   dirDialog.originalIndexBackup = -1;
-
-  // 设置初始路径
-  if (dirDialog.isLocal) {
-    dirDialog.currentPath = '/';
-  } else {
-    dirDialog.currentPath = '/';
-  }
-
-  // 加载目录内容
+  dirDialog.currentPath = '/';
   loadDirContent();
 };
 
@@ -2363,26 +2191,14 @@ const loadDirContent = async () => {
   dirDialog.loading = true;
   dirDialog.error = null;
   dirDialog.items = [];
-
   try {
-    // 本地目录浏览
     if (dirDialog.isLocal) {
       try {
-        // 使用MoviePilot的文件管理API
-        const response = await props.api.post('storage/list', {
-          path: dirDialog.currentPath || '/',
-          type: 'share', // 使用默认的share类型
-          flag: 'ROOT'
-        });
-
+        const response = await props.api.post('storage/list', { path: dirDialog.currentPath || '/', type: 'share', flag: 'ROOT' });
         if (response && Array.isArray(response)) {
           dirDialog.items = response
-            .filter(item => item.type === 'dir') // 只保留目录
-            .map(item => ({
-              name: item.name,
-              path: item.path,
-              is_dir: true
-            }))
+            .filter(item => item.type === 'dir')
+            .map(item => ({ name: item.name, path: item.path, is_dir: true }))
             .sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: 'base' }));
         } else {
           throw new Error('浏览目录失败：无效响应');
@@ -2392,24 +2208,17 @@ const loadDirContent = async () => {
         dirDialog.error = `浏览本地目录失败: ${error.message || '未知错误'}`;
         dirDialog.items = [];
       }
-    }
-    // 115网盘目录浏览
-    else {
-      // 使用常量PLUGIN_ID
-
-      // 检查cookie是否已设置
+    } else {
       if (!config.cookies || config.cookies.trim() === '') {
         throw new Error('请先设置115 Cookie才能浏览网盘目录');
       }
-
-      // 调用API获取目录内容
       const result = await props.api.get(`plugin/${PLUGIN_ID}/browse_dir?path=${encodeURIComponent(dirDialog.currentPath)}&is_local=${dirDialog.isLocal}`);
 
-      if (result && result.code === 0 && result.items) {
-        dirDialog.items = result.items
-          .filter(item => item.is_dir) // 只保留目录
+      if (result && result.code === 0 && result.data) {
+        dirDialog.items = result.data.items
+          .filter(item => item.is_dir)
           .sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: 'base' }));
-        dirDialog.currentPath = result.path || dirDialog.currentPath;
+        dirDialog.currentPath = result.data.path || dirDialog.currentPath;
       } else {
         throw new Error(result?.msg || '获取网盘目录内容失败');
       }
@@ -2417,8 +2226,6 @@ const loadDirContent = async () => {
   } catch (error) {
     console.error('加载目录内容失败:', error);
     dirDialog.error = error.message || '获取目录内容失败';
-
-    // 如果是Cookie错误，清空目录列表
     if (error.message.includes('Cookie') || error.message.includes('cookie')) {
       dirDialog.items = [];
     }
@@ -2429,88 +2236,51 @@ const loadDirContent = async () => {
 
 const selectDir = (item) => {
   if (!item || !item.is_dir) return;
-
   if (item.path) {
     dirDialog.currentPath = item.path;
     loadDirContent();
   }
 };
-
 const navigateToParentDir = () => {
   const path = dirDialog.currentPath;
-
-  // If it's a remote path (115 Pan), use simple, explicit POSIX path logic.
-  // This prevents any Windows-style path contamination.
   if (!dirDialog.isLocal) {
-    if (path === '/') return; // Already at root
-
-    // Normalize and remove any trailing slash (unless it's the root)
+    if (path === '/') return;
     let current = path.replace(/\\/g, '/');
-    if (current.length > 1 && current.endsWith('/')) {
-      current = current.slice(0, -1);
-    }
-
+    if (current.length > 1 && current.endsWith('/')) current = current.slice(0, -1);
     const parent = current.substring(0, current.lastIndexOf('/'));
-
-    // If the parent is empty, it means we were in a top-level directory (e.g., '/movies'), so the parent is the root.
     dirDialog.currentPath = parent === '' ? '/' : parent;
-
     loadDirContent();
-    return; // IMPORTANT: Stop execution to not use the local path logic below.
+    return;
   }
-
   if (path === '/' || path === 'C:\\' || path === 'C:/') return;
-
-  // 统一使用正斜杠处理路径
   const normalizedPath = path.replace(/\\/g, '/');
   const parts = normalizedPath.split('/').filter(Boolean);
-
   if (parts.length === 0) {
     dirDialog.currentPath = '/';
   } else if (parts.length === 1 && normalizedPath.includes(':')) {
-    // Windows驱动器根目录
     dirDialog.currentPath = parts[0] + ':/';
   } else {
-    // 移除最后一个部分
     parts.pop();
-    dirDialog.currentPath = parts.length === 0 ? '/' :
-      (normalizedPath.startsWith('/') ? '/' : '') +
-      parts.join('/') + '/';
+    dirDialog.currentPath = parts.length === 0 ? '/' : (normalizedPath.startsWith('/') ? '/' : '') + parts.join('/') + '/';
   }
-
   loadDirContent();
 };
-
 const confirmDirSelection = () => {
   if (!dirDialog.currentPath) return;
-
   let processedPath = dirDialog.currentPath;
-  // 移除末尾的斜杠，除非路径是 "/" 或者类似 "C:/" 的驱动器根目录
-  if (processedPath !== '/' &&
-    !(/^[a-zA-Z]:[\\\/]$/.test(processedPath)) &&
-    (processedPath.endsWith('/') || processedPath.endsWith('\\\\'))) {
+  if (processedPath !== '/' && !(/^[a-zA-Z]:[\\\/]$/.test(processedPath)) && (processedPath.endsWith('/') || processedPath.endsWith('\\\\'))) {
     processedPath = processedPath.slice(0, -1);
   }
-
-  // Handle exclusion path selection by adding to the respective array
   if (dirDialog.type === 'excludePath' && dirDialog.targetConfigKeyForExclusion) {
     const targetKey = dirDialog.targetConfigKeyForExclusion;
     let targetArrayRef;
-
-    if (targetKey === 'transfer_monitor_scrape_metadata_exclude_paths') {
-      targetArrayRef = transferExcludePaths;
-    } else if (targetKey === 'monitor_life_scrape_metadata_exclude_paths') {
-      targetArrayRef = monitorLifeExcludePaths;
-    } else if (targetKey === 'increment_sync_scrape_metadata_exclude_paths') {
-      targetArrayRef = incrementSyncExcludePaths;
-    }
-
+    if (targetKey === 'transfer_monitor_scrape_metadata_exclude_paths') targetArrayRef = transferExcludePaths;
+    else if (targetKey === 'monitor_life_scrape_metadata_exclude_paths') targetArrayRef = monitorLifeExcludePaths;
+    else if (targetKey === 'increment_sync_scrape_metadata_exclude_paths') targetArrayRef = incrementSyncExcludePaths;
     if (targetArrayRef) {
-      // If the array contains only one empty path, replace it. Otherwise, add a new path.
       if (targetArrayRef.value.length === 1 && !targetArrayRef.value[0].path) {
         targetArrayRef.value[0] = { path: processedPath };
       } else {
-        // Prevent adding duplicate paths
         if (!targetArrayRef.value.some(item => item.path === processedPath)) {
           targetArrayRef.value.push({ path: processedPath });
         } else {
@@ -2520,85 +2290,36 @@ const confirmDirSelection = () => {
         }
       }
     }
-
-    // Restore original dialog type and index from backup, then clear them
     dirDialog.type = dirDialog.originalPathTypeBackup;
     dirDialog.index = dirDialog.originalIndexBackup;
     dirDialog.targetConfigKeyForExclusion = null;
     dirDialog.originalPathTypeBackup = '';
     dirDialog.originalIndexBackup = -1;
   }
-  // Handle original path selection logic for multi-path mappings
   else if (dirDialog.index >= 0 && dirDialog.type !== 'excludePath') {
     switch (dirDialog.type) {
-      case 'transfer':
-        if (dirDialog.isLocal) {
-          transferPaths.value[dirDialog.index].local = processedPath;
-        } else {
-          transferPaths.value[dirDialog.index].remote = processedPath;
-        }
-        break;
-      case 'fullSync':
-        if (dirDialog.isLocal) {
-          fullSyncPaths.value[dirDialog.index].local = processedPath;
-        } else {
-          fullSyncPaths.value[dirDialog.index].remote = processedPath;
-        }
-        break;
-      case 'incrementSync':
-        if (dirDialog.isLocal) {
-          incrementSyncPaths.value[dirDialog.index].local = processedPath;
-        } else {
-          incrementSyncPaths.value[dirDialog.index].remote = processedPath;
-        }
-        break;
-      case 'monitorLife':
-        if (dirDialog.isLocal) {
-          monitorLifePaths.value[dirDialog.index].local = processedPath;
-        } else {
-          monitorLifePaths.value[dirDialog.index].remote = processedPath;
-        }
-        break;
-      case 'panTransfer':
-        panTransferPaths.value[dirDialog.index].path = processedPath;
-        break;
+      case 'transfer': dirDialog.isLocal ? transferPaths.value[dirDialog.index].local = processedPath : transferPaths.value[dirDialog.index].remote = processedPath; break;
+      case 'fullSync': dirDialog.isLocal ? fullSyncPaths.value[dirDialog.index].local = processedPath : fullSyncPaths.value[dirDialog.index].remote = processedPath; break;
+      case 'incrementSync': dirDialog.isLocal ? incrementSyncPaths.value[dirDialog.index].local = processedPath : incrementSyncPaths.value[dirDialog.index].remote = processedPath; break;
+      case 'monitorLife': dirDialog.isLocal ? monitorLifePaths.value[dirDialog.index].local = processedPath : monitorLifePaths.value[dirDialog.index].remote = processedPath; break;
+      case 'panTransfer': panTransferPaths.value[dirDialog.index].path = processedPath; break;
       case 'directoryUpload':
-        if (dirDialog.fieldKey && directoryUploadPaths.value[dirDialog.index]) {
-          directoryUploadPaths.value[dirDialog.index][dirDialog.fieldKey] = processedPath;
-        }
+        if (dirDialog.fieldKey && directoryUploadPaths.value[dirDialog.index]) directoryUploadPaths.value[dirDialog.index][dirDialog.fieldKey] = processedPath;
         break;
     }
   }
-  // 处理单路径的网盘整理未识别目录
-  else if (dirDialog.type === 'panTransferUnrecognized') {
-    config.pan_transfer_unrecognized_path = processedPath;
-  }
-  // Handle share path (used in Page.vue, logic kept for consistency)
-  else if (dirDialog.type === 'sharePath') {
-    if (dirDialog.isLocal) {
-      config.user_share_local_path = processedPath;
-    } else {
-      config.user_share_pan_path = processedPath;
-    }
-  }
-
-  // 关闭对话框
+  else if (dirDialog.type === 'panTransferUnrecognized') config.pan_transfer_unrecognized_path = processedPath;
+  else if (dirDialog.type === 'sharePath') dirDialog.isLocal ? config.user_share_local_path = processedPath : config.user_share_pan_path = processedPath;
   closeDirDialog();
 };
-
 const closeDirDialog = () => {
   dirDialog.show = false;
   dirDialog.items = [];
   dirDialog.error = null;
 };
 
-// 复制Cookie到剪贴板
 const copyCookieToClipboard = async () => {
-  if (!config.cookies) {
-    message.text = 'Cookie为空，无法复制。';
-    message.type = 'warning';
-    return;
-  }
+  if (!config.cookies) { message.text = 'Cookie为空，无法复制。'; message.type = 'warning'; return; }
   try {
     await navigator.clipboard.writeText(config.cookies);
     message.text = 'Cookie已复制到剪贴板！';
@@ -2608,20 +2329,10 @@ const copyCookieToClipboard = async () => {
     message.text = '复制Cookie失败。请检查浏览器权限或确保通过HTTPS访问，或尝试手动复制。';
     message.type = 'error';
   }
-  setTimeout(() => {
-    if (message.type === 'success' || message.type === 'warning' || message.type === 'error') {
-      message.text = '';
-    }
-  }, 3000);
+  setTimeout(() => { if (message.type === 'success' || message.type === 'warning' || message.type === 'error') message.text = ''; }, 3000);
 };
-
-// 复制阿里云盘Token到剪贴板
 const copyAliTokenToClipboard = async () => {
-  if (!config.aliyundrive_token) {
-    message.text = 'Token为空，无法复制。';
-    message.type = 'warning';
-    return;
-  }
+  if (!config.aliyundrive_token) { message.text = 'Token为空，无法复制。'; message.type = 'warning'; return; }
   try {
     await navigator.clipboard.writeText(config.aliyundrive_token);
     message.text = '阿里云盘Token已复制到剪贴板！';
@@ -2631,12 +2342,9 @@ const copyAliTokenToClipboard = async () => {
     message.text = '复制Token失败。请检查浏览器权限或手动复制。';
     message.type = 'error';
   }
-  setTimeout(() => {
-    message.text = '';
-  }, 3000);
+  setTimeout(() => { message.text = ''; }, 3000);
 };
 
-// 二维码登录方法
 const openQrCodeDialog = () => {
   qrDialog.show = true;
   qrDialog.loading = false;
@@ -2645,23 +2353,9 @@ const openQrCodeDialog = () => {
   qrDialog.uid = '';
   qrDialog.time = '';
   qrDialog.sign = '';
-
-  // 确保默认的 clientType 仍然是 clientTypes 中的一个有效值
-  if (!clientTypes.some(ct => ct.value === qrDialog.clientType)) {
-    qrDialog.clientType = 'alipaymini'; // 如果当前值无效，则重置为默认的支付宝
-  }
-
-  // 根据当前的 qrDialog.clientType 设置 tips
+  if (!clientTypes.some(ct => ct.value === qrDialog.clientType)) qrDialog.clientType = 'alipaymini';
   const selectedClient = clientTypes.find(type => type.value === qrDialog.clientType);
-
-  if (selectedClient) {
-    qrDialog.tips = `请使用${selectedClient.label}扫描二维码登录`;
-  } else {
-    // 理应不会到这里，因为上面已经做了校验和重置
-    qrDialog.clientType = 'alipaymini';
-    qrDialog.tips = '请使用支付宝扫描二维码登录';
-  }
-
+  qrDialog.tips = selectedClient ? `请使用${selectedClient.label}扫描二维码登录` : '请使用支付宝扫描二维码登录';
   qrDialog.status = '等待扫码';
   getQrCode();
 };
@@ -2673,32 +2367,20 @@ const getQrCode = async () => {
   qrDialog.uid = '';
   qrDialog.time = '';
   qrDialog.sign = '';
-
-  // 在发送请求前打印实际使用的 clientType
   console.warn(`【115STRM助手 DEBUG】准备获取二维码，前端选择的 clientType: ${qrDialog.clientType}`);
-
   try {
-    // 使用常量PLUGIN_ID
     const response = await props.api.get(`plugin/${PLUGIN_ID}/get_qrcode?client_type=${qrDialog.clientType}`);
-
-    if (response && response.code === 0) {
-      qrDialog.uid = response.uid;
-      qrDialog.time = response.time;
-      qrDialog.sign = response.sign;
-      qrDialog.qrcode = response.qrcode;
-      qrDialog.tips = response.tips || '请扫描二维码登录';
+    if (response && response.code === 0 && response.data) {
+      qrDialog.uid = response.data.uid;
+      qrDialog.time = response.data.time;
+      qrDialog.sign = response.data.sign;
+      qrDialog.qrcode = response.data.qrcode;
+      qrDialog.tips = response.data.tips || '请扫描二维码登录';
       qrDialog.status = '等待扫码';
-
-      // 确保使用响应中的客户端类型，以防服务器调整
-      if (response.client_type) {
-        // console.warn(`【115STRM助手 DEBUG】后端返回 client_type: ${response.client_type}, 更新前端`);
-        qrDialog.clientType = response.client_type;
-      }
-
+      if (response.data.client_type) qrDialog.clientType = response.data.client_type;
       startQrCodeCheckInterval();
     } else {
-      qrDialog.error = response?.error || '获取二维码失败';
-      // 增加日志，查看具体错误信息
+      qrDialog.error = response?.msg || '获取二维码失败';
       console.error("【115STRM助手 DEBUG】获取二维码API调用失败或返回错误码: ", response);
     }
   } catch (err) {
@@ -2709,80 +2391,43 @@ const getQrCode = async () => {
   }
 };
 
-// 检查二维码状态
 const checkQrCodeStatus = async () => {
-  if (!qrDialog.uid || !qrDialog.show) return;
-  if (!qrDialog.time || !qrDialog.show) return;
-  if (!qrDialog.sign || !qrDialog.show) return;
-
+  if (!qrDialog.uid || !qrDialog.show || !qrDialog.time || !qrDialog.sign) return;
   try {
-    // 使用常量PLUGIN_ID
     const response = await props.api.get(`plugin/${PLUGIN_ID}/check_qrcode?uid=${qrDialog.uid}&time=${qrDialog.time}&sign=${qrDialog.sign}&client_type=${qrDialog.clientType}`);
-
-    if (response && response.code === 0) {
-      // 更新状态文本
-      if (response.status === 'waiting') {
-        qrDialog.status = '等待扫码';
-      } else if (response.status === 'scanned') {
-        qrDialog.status = '已扫码，请在设备上确认';
-      } else if (response.status === 'success') {
-
-        // 如果成功获取了cookie
-        if (response.cookie) {
-          // 停止轮询
+    if (response && response.code === 0 && response.data) {
+      const data = response.data;
+      if (data.status === 'waiting') qrDialog.status = '等待扫码';
+      else if (data.status === 'scanned') qrDialog.status = '已扫码，请在设备上确认';
+      else if (data.status === 'success') {
+        if (data.cookie) {
           clearQrCodeCheckInterval();
-
           qrDialog.status = '登录成功！';
-
-          // 更新配置中的 Cookie (前端显示会立即更新)
-          config.cookies = response.cookie;
-
-          // 【重要】不再自动触发保存事件 (emit)
-
-          // 显示成功消息，提示用户需要手动保存
+          config.cookies = data.cookie;
           message.text = '登录成功！Cookie已获取，请点击下方"保存配置"按钮保存。';
           message.type = 'success';
-
-          // 延迟关闭 *仅* QR 对话框
-          setTimeout(() => {
-            qrDialog.show = false;
-          }, 3000); // 3秒延迟，让用户看到消息
-
-          // 移除之前的 emit 调用和相关处理
-
+          setTimeout(() => { qrDialog.show = false; }, 3000);
         } else {
-          // status 为 success 但没有 cookie
           qrDialog.status = '登录似乎成功，但未获取到Cookie';
           message.text = '登录成功但未获取到Cookie信息，请重试或检查账号。';
           message.type = 'warning';
-          // 停止轮询
           clearQrCodeCheckInterval();
         }
       }
-    } else if (response && response.code === -1) {
-      // 二维码出错或过期 (仅在非成功获取Cookie的情况下处理)
-      if (qrDialog.status !== '登录成功，正在处理...') { // 避免覆盖成功后的状态
+    } else if (response) {
+      if (qrDialog.status !== '登录成功，正在处理...') {
         clearQrCodeCheckInterval();
-        qrDialog.error = response.error || '二维码已失效，请刷新';
+        qrDialog.error = response.msg || '二维码已失效，请刷新';
         qrDialog.status = '二维码已失效';
       }
     }
   } catch (err) {
-    // 仅在非成功获取Cookie的情况下处理网络等错误
-    if (qrDialog.status !== '登录成功，正在处理...') {
-      console.error('检查二维码状态JS捕获异常:', err);
-      // 可以在这里添加一些错误提示，但要避免频繁报错干扰用户
-      // qrDialog.error = `检查状态出错: ${err.message}`;
-    }
+    if (qrDialog.status !== '登录成功，正在处理...') console.error('检查二维码状态JS捕获异常:', err);
   }
 };
 
-// 开始二维码状态检查定时器
 const startQrCodeCheckInterval = () => {
-  // 先清除可能存在的定时器
   clearQrCodeCheckInterval();
-
-  // 设置新的定时器，每3秒检查一次
   qrDialog.checkIntervalId = setInterval(checkQrCodeStatus, 3000);
 };
 
@@ -2803,10 +2448,10 @@ const getAliQrCode = async () => {
   aliQrDialog.qrcode = '';
   try {
     const response = await props.api.get(`plugin/${PLUGIN_ID}/get_aliyundrive_qrcode`);
-    if (response && response.code === 0) {
-      aliQrDialog.qrcode = response.qrcode;
-      aliQrDialog.t = response.t;
-      aliQrDialog.ck = response.ck;
+    if (response && response.code === 0 && response.data) {
+      aliQrDialog.qrcode = response.data.qrcode;
+      aliQrDialog.t = response.data.t;
+      aliQrDialog.ck = response.data.ck;
       aliQrDialog.status = '等待扫码';
       startAliQrCodeCheckInterval();
     } else {
@@ -2821,23 +2466,19 @@ const getAliQrCode = async () => {
 
 const checkAliQrCodeStatus = async () => {
   if (!aliQrDialog.t || !aliQrDialog.ck || !aliQrDialog.show) return;
-
   try {
     const response = await props.api.get(`plugin/${PLUGIN_ID}/check_aliyundrive_qrcode?t=${aliQrDialog.t}&ck=${encodeURIComponent(aliQrDialog.ck)}`);
-
-    if (response && response.code === 0) {
-      if (response.status === 'success' && response.token) {
+    if (response && response.code === 0 && response.data) {
+      if (response.data.status === 'success' && response.data.token) {
         clearAliQrCodeCheckInterval();
         aliQrDialog.status = '登录成功！';
-        config.aliyundrive_token = response.token;
+        config.aliyundrive_token = response.data.token;
         message.text = '阿里云盘登录成功！Token已获取，请点击下方“保存配置”按钮。';
         message.type = 'success';
-        setTimeout(() => {
-          aliQrDialog.show = false;
-        }, 2000);
+        setTimeout(() => { aliQrDialog.show = false; }, 2000);
       } else {
-        aliQrDialog.status = response.msg || '等待扫码';
-        if (response.status === 'expired' || response.status === 'invalid') {
+        aliQrDialog.status = response.data.msg || '等待扫码';
+        if (response.data.status === 'expired' || response.data.status === 'invalid') {
           clearAliQrCodeCheckInterval();
           aliQrDialog.error = '二维码已失效，请刷新';
         }
@@ -2856,20 +2497,17 @@ const startAliQrCodeCheckInterval = () => {
   clearAliQrCodeCheckInterval();
   aliQrDialog.checkIntervalId = setInterval(checkAliQrCodeStatus, 2000);
 };
-
 const clearAliQrCodeCheckInterval = () => {
   if (aliQrDialog.checkIntervalId) {
     clearInterval(aliQrDialog.checkIntervalId);
     aliQrDialog.checkIntervalId = null;
   }
 };
-
 const refreshAliQrCode = () => {
   clearAliQrCodeCheckInterval();
   aliQrDialog.error = null;
   getAliQrCode();
 };
-
 const closeAliQrCodeDialog = () => {
   clearAliQrCodeCheckInterval();
   aliQrDialog.show = false;
@@ -2881,71 +2519,36 @@ const clearQrCodeCheckInterval = () => {
     qrDialog.checkIntervalId = null;
   }
 };
-
 const refreshQrCode = () => {
-  // 清除之前的状态和定时器
   clearQrCodeCheckInterval();
   qrDialog.error = null;
-
-  // 根据当前选择的客户端类型调整提示
-  switch (qrDialog.clientType) {
-    case 'alipaymini':
-      qrDialog.tips = '请使用支付宝扫描二维码登录';
-      break;
-    case 'wechatmini':
-      qrDialog.tips = '请使用微信扫描二维码登录';
-      break;
-    case '115android':
-      qrDialog.tips = '请使用115安卓客户端扫描登录';
-      break;
-    case '115ios':
-      qrDialog.tips = '请使用115 iOS客户端扫描登录';
-      break;
-    case 'web':
-      qrDialog.tips = '请使用115网页版扫码登录';
-      break;
-    default:
-      // 如果匹配不到，尝试从 clientTypes 数组中查找 label
-      const matchedType = clientTypes.find(type => type.value === qrDialog.clientType);
-      if (matchedType) {
-        qrDialog.tips = `请使用${matchedType.label}扫描二维码登录`;
-      } else {
-        qrDialog.tips = '请扫描二维码登录'; // 最终回退
-      }
-  }
-
-  // 重新获取二维码
+  const matchedType = clientTypes.find(type => type.value === qrDialog.clientType);
+  qrDialog.tips = matchedType ? `请使用${matchedType.label}扫描二维码登录` : '请扫描二维码登录';
   getQrCode();
 };
-
 const closeQrDialog = () => {
   clearQrCodeCheckInterval();
   qrDialog.show = false;
 };
 
-// 组件生命周期
 onMounted(async () => {
   await loadConfig();
   await checkTransferModuleEnhancement();
 });
 
-// 组件销毁时清理资源
 onBeforeUnmount(() => {
   console.log('组件即将卸载，清理定时器...');
   clearQrCodeCheckInterval();
   clearAliQrCodeCheckInterval();
 });
 
-// 监听 qrDialog.clientType 的变化来调用 refreshQrCode
 watch(() => qrDialog.clientType, (newVal, oldVal) => {
-  // 仅当值实际改变且对话框可见时才刷新
   if (newVal !== oldVal && qrDialog.show) {
     console.log(`【115STRM助手 DEBUG】qrDialog.clientType 从 ${oldVal} 变为 ${newVal}，准备刷新二维码`);
     refreshQrCode();
   }
 });
 
-// 新增：设置MoviePilot地址为当前源
 const setMoviePilotAddressToCurrentOrigin = () => {
   if (window && window.location && window.location.origin) {
     config.moviepilot_address = window.location.origin;
@@ -2962,43 +2565,29 @@ const setMoviePilotAddressToCurrentOrigin = () => {
   }, 3000);
 };
 
-// 新增：打开排除目录选择器的方法 (专用于本地目录选择)
 const openExcludeDirSelector = (configKeyToUpdate) => {
   dirDialog.show = true;
-  dirDialog.isLocal = true; // Always local for exclusion paths
+  dirDialog.isLocal = true;
   dirDialog.loading = false;
   dirDialog.error = null;
   dirDialog.items = [];
-  dirDialog.currentPath = '/'; // 默认起始路径
-
-  // Backup original type and index before overriding for exclusion path selection
+  dirDialog.currentPath = '/';
   dirDialog.originalPathTypeBackup = dirDialog.type;
   dirDialog.originalIndexBackup = dirDialog.index;
-
   dirDialog.targetConfigKeyForExclusion = configKeyToUpdate;
-  dirDialog.type = 'excludePath'; // Special type for this operation
-  dirDialog.index = -1;           // Index is not relevant for appending to a textarea
-
+  dirDialog.type = 'excludePath';
+  dirDialog.index = -1;
   loadDirContent();
 };
 
-// 新增：移除排除目录条目
 const removeExcludePathEntry = (index, type) => {
   let targetArrayRef;
-  if (type === 'transfer_exclude') {
-    targetArrayRef = transferExcludePaths;
-  } else if (type === 'life_exclude') {
-    targetArrayRef = monitorLifeExcludePaths;
-  } else if (type === 'increment_exclude') {
-    targetArrayRef = incrementSyncExcludePaths;
-  }
-
+  if (type === 'transfer_exclude') targetArrayRef = transferExcludePaths;
+  else if (type === 'life_exclude') targetArrayRef = monitorLifeExcludePaths;
+  else if (type === 'increment_exclude') targetArrayRef = incrementSyncExcludePaths;
   if (targetArrayRef && targetArrayRef.value && index < targetArrayRef.value.length) {
     targetArrayRef.value.splice(index, 1);
-    if (targetArrayRef.value.length === 0) {
-      // 保留一个空条目以触发 watcher 更新为空字符串，并为UI提供添加按钮的基础
-      targetArrayRef.value = [{ path: '' }];
-    }
+    if (targetArrayRef.value.length === 0) targetArrayRef.value = [{ path: '' }];
   }
 };
 </script>

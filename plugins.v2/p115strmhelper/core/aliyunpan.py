@@ -1,7 +1,7 @@
 from typing import List, Dict, Optional
 from pathlib import Path
 
-import requests
+import httpx
 from orjson import loads
 from aligo import Aligo, BatchRequest, BatchSubRequest
 
@@ -32,10 +32,10 @@ class AliyunPanLogin:
         }
 
         try:
-            res = requests.get(url, params=params, timeout=10)
+            res = httpx.get(url, params=params, timeout=10, follow_redirects=True)
             res.raise_for_status()
             return res.json()
-        except requests.exceptions.RequestException as e:
+        except httpx.RequestError as e:
             return {"error": str(e)}
 
     @staticmethod
@@ -68,7 +68,7 @@ class AliyunPanLogin:
                 "referer": "https://passport.aliyundrive.com/mini_login.htm?&appName=aliyun_drive",
             }
 
-            res = requests.post(url, data=form_data, headers=headers, timeout=10)
+            res = httpx.post(url, data=form_data, headers=headers, timeout=10, follow_redirects=True)
             res.raise_for_status()
 
             return res.json()

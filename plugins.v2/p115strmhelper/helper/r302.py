@@ -4,7 +4,7 @@ from errno import EIO, ENOENT
 from urllib.parse import parse_qsl, unquote, urlsplit, urlencode
 from threading import Timer
 
-import requests
+import httpx
 from orjson import dumps, loads
 from p115client import P115Client
 from p115client import check_response as p115_check_response
@@ -83,17 +83,19 @@ class Redirect:
         suffix = name.rpartition(".")[-1]
         if suffix.isalnum():
             payload["suffix"] = suffix
-        resp = requests.get(
+        resp = httpx.get(
             f"{api}?{urlencode(payload)}",
-            headers={"Cookie": configer.get_config("cookies")},
+            follow_redirects=True,
+            cookies=configer.cookies_dict,
         )
         check_response(resp)
         json = loads(cast(bytes, resp.content))
         if self.get_first(json, "errno", "errNo") == 20021:
             payload.pop("suffix")
-            resp = requests.get(
+            resp = httpx.get(
                 f"{api}?{urlencode(payload)}",
-                headers={"Cookie": configer.get_config("cookies")},
+                follow_redirects=True,
+                cookies=configer.cookies_dict,
             )
             check_response(resp)
             json = loads(cast(bytes, resp.content))
@@ -110,9 +112,10 @@ class Redirect:
         """
         获取接收码
         """
-        resp = requests.get(
+        resp = httpx.get(
             f"http://web.api.115.com/share/shareinfo?share_code={share_code}",
-            headers={"Cookie": configer.get_config("cookies")},
+            follow_redirects=True,
+            cookies=configer.cookies_dict,
         )
         check_response(resp)
         json = loads(cast(bytes, resp.content))
@@ -150,15 +153,16 @@ class Redirect:
             post_pickcode = self.get_pickcode_for_copy(pickcode)
             logger.debug(f"【302跳转服务】多端播放开启 {pickcode} -> {post_pickcode}")
 
-        resp = requests.post(
+        resp = httpx.post(
             "http://proapi.115.com/android/2.0/ufile/download",
             data={
                 "data": encrypt(f'{{"pick_code":"{post_pickcode}"}}').decode("utf-8")
             },
             headers={
                 "User-Agent": user_agent,
-                "Cookie": configer.get_config("cookies"),
             },
+            follow_redirects=True,
+            cookies=configer.cookies_dict,
         )
         check_response(resp)
         json = loads(cast(bytes, resp.content))
@@ -264,10 +268,11 @@ class Redirect:
             "receive_code": receive_code,
             "file_id": file_id,
         }
-        resp = requests.post(
+        resp = httpx.post(
             "http://proapi.115.com/app/share/downurl",
             data={"data": encrypt(dumps(payload)).decode("utf-8")},
-            headers={"Cookie": configer.get_config("cookies")},
+            follow_redirects=True,
+            cookies=configer.cookies_dict,
         )
         check_response(resp)
         json = loads(cast(bytes, resp.content))

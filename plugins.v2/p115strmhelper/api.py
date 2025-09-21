@@ -1,19 +1,20 @@
-import base64
-import io
-import time
+from base64 import b64encode, b64decode
+from io import BytesIO
 from datetime import datetime
 from dataclasses import asdict
-from typing import Dict, Any, Optional
+from time import time, sleep
+from typing import Dict, Optional
 from pathlib import Path
 from urllib.parse import quote
 
-import qrcode
-import requests
+import httpx
+from qrcode import make as qr_make
 from orjson import dumps, loads
 from p115client import P115Client
 from p115client.exception import DataError
 from p115client.tool.fs_files import iter_fs_files
-from fastapi import Request, Response
+from fastapi import Request, Response, Depends, status
+from fastapi.responses import JSONResponse
 
 from .service import servicer
 from .core.config import configer
@@ -21,6 +22,29 @@ from .core.cache import idpathcacher
 from .core.message import post_message
 from .core.i18n import i18n
 from .core.aliyunpan import AliyunPanLogin
+from .schemas.offline import (
+    OfflineTasksPayload,
+    AddOfflineTaskPayload,
+    OfflineTasksData,
+)
+from .schemas.aliyun import (
+    AliyunDriveQRCodeData,
+    CheckAliyunDriveQRCodeParams,
+    CheckAliyunDriveQRCodeData,
+)
+from .schemas.machineid import MachineID, MachineIDFeature
+from .schemas.browse import BrowseDirParams, BrowseDirData, DirectoryItem
+from .schemas.u115 import (
+    QRCodeData,
+    CheckQRCodeData,
+    CheckQRCodeParams,
+    GetQRCodeParams,
+    UserInfo,
+    UserStorageStatusResponse,
+    StorageInfo,
+)
+from .schemas.plugin import PluginStatusData
+from .schemas.base import ApiResponse
 from .utils.sentry import sentry_manager
 from .utils.oopserver import OOPServerHelper
 from .helper.webdav import webdav_service
@@ -60,51 +84,49 @@ class Api:
         return config
 
     @staticmethod
-    def get_machine_id_api() -> Dict:
+    def get_machine_id_api() -> MachineID:
         """
         获取 Machine ID
         """
-        return {"machine_id": configer.get_config("MACHINE_ID")}
+        return MachineID(machine_id=configer.MACHINE_ID)
 
     @cached(
         region="p115strmhelper_api_get_user_storage_status", ttl=60 * 60, skip_none=True
     )
-    def get_user_storage_status(self) -> Dict[str, Any]:
+    def get_user_storage_status(self) -> UserStorageStatusResponse:
         """
         获取115用户基本信息和空间使用情况。
         """
         if not configer.get_config("cookies"):
-            return {
-                "success": False,
-                "error_message": "115 Cookies 未配置，无法获取信息。",
-                "user_info": None,
-                "storage_info": None,
-            }
+            return UserStorageStatusResponse(
+                success=False,
+                error_message="115 Cookies 未配置，无法获取信息。",
+                storage_info=None,
+                user_info=None,
+            )
 
         try:
-            if not self._client:
+            _temp_client = self._client
+            if not _temp_client:
                 try:
                     _temp_client = P115Client(configer.get_config("cookies"))
                     logger.info("【用户存储状态】P115Client 初始化成功")
                 except Exception as e:
                     logger.error(f"【用户存储状态】P115Client 初始化失败: {e}")
-                    return {
-                        "success": False,
-                        "error_message": f"115客户端初始化失败: {e}",
-                        "user_info": None,
-                        "storage_info": None,
-                    }
-            else:
-                _temp_client = self._client
+                    return UserStorageStatusResponse(
+                        success=False,
+                        error_message=f"115客户端初始化失败: {e}",
+                        storage_info=None,
+                        user_info=None,
+                    )
 
             # 获取用户信息
             user_info_resp = _temp_client.user_my_info()
-            user_details: Dict = {}
             if user_info_resp.get("state"):
                 data = user_info_resp.get("data", {})
                 vip_data = data.get("vip", {})
                 face_data = data.get("face", {})
-                user_details = {
+                user_details_dict = {
                     "name": data.get("uname"),
                     "is_vip": vip_data.get("is_vip"),
                     "is_forever_vip": vip_data.get("is_forever"),
@@ -114,7 +136,7 @@ class Api:
                     "avatar": face_data.get("face_s"),
                 }
                 logger.info(
-                    f"【用户存储状态】获取用户信息成功: {user_details.get('name')}"
+                    f"【用户存储状态】获取用户信息成功: {user_details_dict.get('name')}"
                 )
             else:
                 error_msg = (
@@ -123,25 +145,24 @@ class Api:
                     else "获取用户信息响应为空"
                 )
                 logger.error(f"【用户存储状态】获取用户信息失败: {error_msg}")
-                return {
-                    "success": False,
-                    "error_message": f"获取115用户信息失败: {error_msg}",
-                    "user_info": None,
-                    "storage_info": None,
-                }
+                return UserStorageStatusResponse(
+                    success=False,
+                    error_message=f"获取115用户信息失败: {error_msg}",
+                    storage_info=None,
+                    user_info=None,
+                )
 
             # 获取空间信息
             space_info_resp = _temp_client.fs_index_info(payload=0)
-            storage_details = None
             if space_info_resp.get("state"):
                 data = space_info_resp.get("data", {}).get("space_info", {})
-                storage_details = {
+                storage_details_dict = {
                     "total": data.get("all_total", {}).get("size_format"),
                     "used": data.get("all_use", {}).get("size_format"),
                     "remaining": data.get("all_remain", {}).get("size_format"),
                 }
                 logger.info(
-                    f"【用户存储状态】获取空间信息成功: 总-{storage_details.get('total')}"
+                    f"【用户存储状态】获取空间信息成功: 总-{storage_details_dict.get('total')}"
                 )
             else:
                 error_msg = (
@@ -150,18 +171,20 @@ class Api:
                     else "获取空间信息响应为空"
                 )
                 logger.error(f"【用户存储状态】获取空间信息失败: {error_msg}")
-                return {
-                    "success": False,
-                    "error_message": f"获取115空间信息失败: {error_msg}",
-                    "user_info": user_details,
-                    "storage_info": None,
-                }
+                return UserStorageStatusResponse(
+                    success=False,
+                    error_message=f"获取115空间信息失败: {error_msg}",
+                    user_info=UserInfo.parse_obj(user_details_dict),
+                    storage_info=None,
+                )
 
-            return {
-                "success": True,
-                "user_info": user_details,
-                "storage_info": storage_details,
-            }
+            return UserStorageStatusResponse(
+                success=True,
+                user_info=UserInfo.parse_obj(user_details_dict),
+                storage_info=StorageInfo.parse_obj(storage_details_dict)
+                if storage_details_dict
+                else None,
+            )
 
         except Exception as e:
             logger.error(f"【用户存储状态】获取信息时发生意外错误: {e}", exc_info=True)
@@ -183,24 +206,26 @@ class Api:
             else:
                 specific_error_message = f"处理请求时发生错误: {str(e)}"
 
-            result_to_return = {
-                "success": False,
-                "error_message": specific_error_message,
-                "user_info": None,
-                "storage_info": None,
-            }
-            return result_to_return
+            return UserStorageStatusResponse(
+                success=False,
+                error_message=specific_error_message,
+                storage_info=None,
+                user_info=None,
+            )
 
-    def browse_dir_api(self, request: Request) -> Dict:
+    def browse_dir_api(
+        self, params: BrowseDirParams = Depends()
+    ) -> ApiResponse[BrowseDirData]:
         """
         浏览目录
         """
-        path = Path(request.query_params.get("path", "/"))
-        is_local = request.query_params.get("is_local", "false").lower() == "true"
+        path = Path(params.path)
+        is_local = params.is_local
+
         if is_local:
             try:
                 if not path.exists():
-                    return {"code": 1, "msg": f"目录不存在: {path}"}
+                    return ApiResponse(code=1, msg=f"目录不存在: {path}")
                 dirs = []
                 files = []
                 for item in path.iterdir():
@@ -212,77 +237,69 @@ class Api:
                         files.append(
                             {"name": item.name, "path": str(item), "is_dir": False}
                         )
-                return {
-                    "code": 0,
-                    "path": path,
-                    "items": sorted(dirs, key=lambda x: x["name"]),
-                }
+                return ApiResponse(
+                    data=BrowseDirData(
+                        path=str(path), items=sorted(dirs, key=lambda x: x["name"])
+                    )
+                )
             except Exception as e:
-                return {"code": 1, "msg": f"浏览本地目录失败: {str(e)}"}
+                return ApiResponse(code=1, msg=f"浏览本地目录失败: {str(e)}")
         else:
             if not self._client or not configer.get_config("cookies"):
-                return {"code": 1, "msg": "未配置cookie或客户端初始化失败"}
+                return ApiResponse(code=1, msg="未配置cookie或客户端初始化失败")
 
-            if time.time() - self.browse_dir_pan_api_last < 2:
+            if time() - self.browse_dir_pan_api_last < 2:
                 logger.debug("浏览网盘目录 API 限流，等待 2s 后继续")
-                time.sleep(2)
+                sleep(2)
 
             try:
-                items = self.browse_dir_pan_api_cache.get(key=path.as_posix())
-                if items:
-                    return items
+                cached_result = self.browse_dir_pan_api_cache.get(key=path.as_posix())
+                if cached_result:
+                    return cached_result
 
-                if path.as_posix() == "/":
-                    cid = 0
-                else:
+                cid = 0
+                if path.as_posix() != "/":
                     dir_info = self._client.fs_dir_getid(path.as_posix())
                     if not dir_info:
-                        return {"code": 1, "msg": f"获取目录ID失败: {path}"}
+                        return ApiResponse(code=1, msg=f"获取目录ID失败: {path}")
                     cid = int(dir_info["id"])
 
                 items = []
                 for batch in iter_fs_files(self._client, cid, cooldown=2):
                     for item in batch.get("data", []):
                         if "fid" not in item:
+                            full_path = f"{path.as_posix().rstrip('/')}/{item.get('n')}"
                             idpathcacher.add_cache(
-                                id=int(item.get("cid")),
-                                directory=f"{path.as_posix().rstrip('/')}/{item.get('n')}",
+                                id=int(item.get("cid")), directory=full_path
                             )
                             items.append(
-                                {
-                                    "name": item.get("n"),
-                                    "path": f"{path.as_posix().rstrip('/')}/{item.get('n')}",
-                                    "is_dir": True,
-                                }
+                                DirectoryItem(
+                                    name=item.get("n"), path=full_path, is_dir=True
+                                )
                             )
-                self.browse_dir_pan_api_last = time.time()
-                items = {
-                    "code": 0,
-                    "path": path.as_posix(),
-                    "items": sorted(items, key=lambda x: x["name"]),
-                }
-                self.browse_dir_pan_api_cache.set(key=path.as_posix(), value=items)
-                return items
+
+                self.browse_dir_pan_api_last = time()
+
+                response_data = ApiResponse(
+                    data=BrowseDirData(
+                        path=path.as_posix(), items=sorted(items, key=lambda x: x.name)
+                    )
+                )
+                self.browse_dir_pan_api_cache.set(
+                    key=path.as_posix(), value=response_data
+                )
+                return response_data
             except Exception as e:
                 logger.error(f"浏览网盘目录 API 原始错误: {str(e)}")
-                return {"code": 1, "msg": f"浏览网盘目录失败: {str(e)}"}
+                return ApiResponse(code=1, msg=f"浏览网盘目录失败: {str(e)}")
 
     @staticmethod
-    def get_qrcode_api(
-        request: Request = None, client_type_override: Optional[str] = None
-    ) -> Dict:
+    def get_qrcode_api(params: GetQRCodeParams = Depends()) -> ApiResponse[QRCodeData]:
         """
         获取登录二维码
         """
         try:
-            final_client_type = client_type_override
-            if not final_client_type:
-                final_client_type = (
-                    request.query_params.get("client_type", "alipaymini")
-                    if request
-                    else "alipaymini"
-                )
-            # 二维码支持的客户端类型验证
+            final_client_type = params.client_type
             allowed_types = [
                 "web",
                 "android",
@@ -300,36 +317,22 @@ class Api:
 
             logger.info(f"【扫码登入】二维码API - 使用客户端类型: {final_client_type}")
 
-            resp = requests.get(
+            resp = httpx.get(
                 "https://qrcodeapi.115.com/api/1.0/web/1.0/token/", timeout=10
             )
-            if not resp.ok:
-                error_msg = f"获取二维码token失败: {resp.status_code} - {resp.text}"
-                return {
-                    "code": -1,
-                    "error": error_msg,
-                    "message": error_msg,
-                    "success": False,
-                }
+            resp.raise_for_status()
             resp_info = resp.json().get("data", {})
             uid = resp_info.get("uid", "")
             _time = resp_info.get("time", "")
             sign = resp_info.get("sign", "")
 
-            resp = requests.get(
+            resp = httpx.get(
                 f"https://qrcodeapi.115.com/api/1.0/web/1.0/qrcode?uid={uid}",
                 timeout=10,
             )
-            if not resp.ok:
-                error_msg = f"获取二维码图片失败: {resp.status_code} - {resp.text}"
-                return {
-                    "code": -1,
-                    "error": error_msg,
-                    "message": error_msg,
-                    "success": False,
-                }
+            resp.raise_for_status()
 
-            qrcode_base64 = base64.b64encode(resp.content).decode("utf-8")
+            qrcode_base64 = b64encode(resp.content).decode("utf-8")
 
             tips_map = {
                 "alipaymini": "请使用115客户端或支付宝扫描二维码登录",
@@ -345,208 +348,204 @@ class Api:
             }
             tips = tips_map.get(final_client_type, "请扫描二维码登录")
 
-            return {
-                "code": 0,
-                "uid": uid,
-                "time": _time,
-                "sign": sign,
-                "qrcode": f"data:image/png;base64,{qrcode_base64}",
-                "tips": tips,
-                "client_type": final_client_type,
-                "success": True,
-            }
+            return ApiResponse(
+                data=QRCodeData(
+                    uid=uid,
+                    time=_time,
+                    sign=sign,
+                    qrcode=f"data:image/png;base64,{qrcode_base64}",
+                    tips=tips,
+                    client_type=final_client_type,
+                )
+            )
 
+        except httpx.HTTPStatusError as e:
+            error_msg = f"获取二维码失败: {e.response.status_code} - {e.response.text}"
+            logger.error(f"【扫码登入】获取二维码HTTP错误: {error_msg}", exc_info=True)
+            return ApiResponse(code=-1, msg=error_msg)
         except Exception as e:
+            error_msg = f"获取登录二维码出错: {str(e)}"
             logger.error(f"【扫码登入】获取二维码异常: {e}", exc_info=True)
-            return {
-                "code": -1,
-                "error": f"获取登录二维码出错: {str(e)}",
-                "message": f"获取登录二维码出错: {str(e)}",
-                "success": False,
-            }
+            return ApiResponse(code=-1, msg=error_msg)
 
     def _check_qrcode_api_internal(
-        self,
-        uid: str,
-        _time: str,
-        sign: str,
-        client_type: str,
-    ) -> Dict:
+        self, uid: str, _time: str, sign: str, client_type: str
+    ) -> ApiResponse[CheckQRCodeData]:
         """
         检查二维码状态并处理登录
         """
         try:
             if not uid:
-                error_msg = "无效的二维码ID，参数uid不能为空"
-                return {"code": -1, "error": error_msg, "message": error_msg}
+                return ApiResponse(code=-1, msg="无效的二维码ID，参数uid不能为空")
 
-            resp = requests.get(
+            resp = httpx.get(
                 f"https://qrcodeapi.115.com/get/status/?uid={uid}&time={_time}&sign={sign}",
                 timeout=120,
             )
+            resp.raise_for_status()
             status_code = resp.json().get("data").get("status")
         except Exception as e:
             error_msg = f"检查二维码状态异常: {str(e)}"
             logger.error(f"【扫码登入】检查二维码状态异常: {e}", exc_info=True)
-            return {"code": -1, "error": error_msg, "message": error_msg}
+            return ApiResponse(code=-1, msg=error_msg)
 
-        status_map = {
-            0: {"code": 0, "status": "waiting", "msg": "等待扫码"},
-            1: {"code": 0, "status": "scanned", "msg": "已扫码，等待确认"},
-            2: {"code": 0, "status": "success", "msg": "已确认，正在登录"},
-            -1: {"code": -1, "error": "二维码已过期", "message": "二维码已过期"},
-            -2: {"code": -1, "error": "用户取消登录", "message": "用户取消登录"},
-        }
+        if status_code == 0:
+            return ApiResponse(data=CheckQRCodeData(status="waiting", msg="等待扫码"))
+        if status_code == 1:
+            return ApiResponse(
+                data=CheckQRCodeData(status="scanned", msg="已扫码，等待确认")
+            )
+        if status_code == -1 or (
+            status_code is None and resp.json().get("message") == "key invalid"
+        ):
+            return ApiResponse(code=-1, msg="二维码已过期")
+        if status_code == -2:
+            return ApiResponse(code=-1, msg="用户取消登录")
 
-        if status_code in status_map:
-            result = status_map[status_code].copy()
-            if status_code == 2:
-                try:
-                    resp = requests.post(
-                        f"https://passportapi.115.com/app/1.0/{client_type}/1.0/login/qrcode/",
-                        data={"app": client_type, "account": uid},
-                        timeout=10,
+        if status_code == 2:
+            try:
+                resp = httpx.post(
+                    f"https://passportapi.115.com/app/1.0/{client_type}/1.0/login/qrcode/",
+                    data={"app": client_type, "account": uid},
+                    timeout=10,
+                )
+                resp.raise_for_status()
+                login_data = resp.json()
+            except Exception as e:
+                return ApiResponse(code=-1, msg=f"获取登录结果请求失败: {e}")
+
+            if login_data.get("state") and login_data.get("data"):
+                cookie_data = login_data.get("data", {})
+                cookie_string = ""
+                if "cookie" in cookie_data and isinstance(cookie_data["cookie"], dict):
+                    cookie_string = "; ".join(
+                        [
+                            f"{name}={value}"
+                            for name, value in cookie_data["cookie"].items()
+                            if name and value
+                        ]
                     )
-                    login_data = resp.json()
-                except Exception as e:
-                    return {
-                        "code": -1,
-                        "error": f"获取登录结果请求失败: {e}",
-                        "message": f"获取登录结果请求失败: {e}",
-                    }
 
-                if login_data.get("state") and login_data.get("data"):
-                    cookie_data = login_data.get("data", {})
-                    cookie_string = ""
-                    if "cookie" in cookie_data and isinstance(
-                        cookie_data["cookie"], dict
-                    ):
-                        for name, value in cookie_data["cookie"].items():
-                            if name and value:
-                                cookie_string += f"{name}={value}; "
-                    if cookie_string:
-                        _cookies = cookie_string.strip()
-                        configer.update_config({"cookies": _cookies})
-                        configer.update_plugin_config()
-                        try:
-                            self._client = P115Client(_cookies)
-                            result["cookie"] = cookie_string
-                        except Exception as ce:
-                            return {
-                                "code": -1,
-                                "error": f"Cookie获取成功，但客户端初始化失败: {str(ce)}",
-                                "message": f"Cookie获取成功，但客户端初始化失败: {str(ce)}",
-                            }
-                    else:
-                        return {
-                            "code": -1,
-                            "error": "登录成功但未能正确解析Cookie",
-                            "message": "登录成功但未能正确解析Cookie",
-                        }
+                if cookie_string:
+                    _cookies = cookie_string.strip()
+                    configer.update_config({"cookies": _cookies})
+                    configer.update_plugin_config()
+                    try:
+                        self._client = P115Client(_cookies)
+                        return ApiResponse(
+                            data=CheckQRCodeData(
+                                status="success", msg="登录成功", cookie=_cookies
+                            )
+                        )
+                    except Exception as ce:
+                        return ApiResponse(
+                            code=-1,
+                            msg=f"Cookie获取成功，但客户端初始化失败: {str(ce)}",
+                        )
                 else:
-                    specific_error = login_data.get(
-                        "message", login_data.get("error", "未知错误")
-                    )
-                    return {
-                        "code": -1,
-                        "error": f"获取登录会话数据失败: {specific_error}",
-                        "message": f"获取登录会话数据失败: {specific_error}",
-                    }
-            return result
-        elif status_code is None:
-            if resp.json().get("message", None) == "key invalid":
-                return status_map[-1].copy()
-            return status_map[0].copy()
-        else:
-            return {
-                "code": -1,
-                "error": f"未知的115业务状态码: {status_code}",
-                "message": f"未知的115业务状态码: {status_code}",
-            }
+                    return ApiResponse(code=-1, msg="登录成功但未能正确解析Cookie")
+            else:
+                specific_error = login_data.get(
+                    "message", login_data.get("error", "未知错误")
+                )
+                return ApiResponse(
+                    code=-1, msg=f"获取登录会话数据失败: {specific_error}"
+                )
 
-    def check_qrcode_api(self, request: Request) -> Dict:
+        if status_code is None:
+            return ApiResponse(data=CheckQRCodeData(status="waiting", msg="等待扫码"))
+
+        return ApiResponse(code=-1, msg=f"未知的115业务状态码: {status_code}")
+
+    def check_qrcode_api(
+        self, params: CheckQRCodeParams = Depends()
+    ) -> ApiResponse[CheckQRCodeData]:
         """
         检查二维码状态
         """
-        uid = request.query_params.get("uid", "")
-        _time = request.query_params.get("time", "")
-        sign = request.query_params.get("sign", "")
-        client_type = request.query_params.get("client_type", "alipaymini")
         return self._check_qrcode_api_internal(
-            uid=uid, _time=_time, sign=sign, client_type=client_type
+            uid=params.uid,
+            _time=params.time,
+            sign=params.sign,
+            client_type=params.client_type,
         )
 
     @staticmethod
-    def get_aliyundrive_qrcode_api():
+    def get_aliyundrive_qrcode_api() -> ApiResponse[AliyunDriveQRCodeData]:
         """
         获取阿里云盘登入二维码
         """
         try:
             data = AliyunPanLogin.qr().get("content").get("data")
             if data:
-                code_content = data.get("codeContent")
-                t_param = data.get("t")
-                ck_param = data.get("ck")
-
-                img = qrcode.make(code_content)
-                buffered = io.BytesIO()
+                img = qr_make(data.get("codeContent"))
+                buffered = BytesIO()
                 img.save(buffered, format="PNG")
-                img_bytes = buffered.getvalue()
-                base64_encoded_string = base64.b64encode(img_bytes)
-                base64_string = base64_encoded_string.decode("utf-8")
-                data_url = f"data:image/png;base64,{base64_string}"
+                base64_string = b64encode(buffered.getvalue()).decode("utf-8")
 
-                response_data = {
-                    "code": 0,
-                    "msg": "获取成功",
-                    "qrcode": data_url,
-                    "t": t_param,
-                    "ck": ck_param,
-                }
-                return response_data
+                return ApiResponse(
+                    data=AliyunDriveQRCodeData(
+                        qrcode=f"data:image/png;base64,{base64_string}",
+                        t=data.get("t"),
+                        ck=data.get("ck"),
+                    )
+                )
             else:
-                return {"code": -1, "msg": "获取二维码失败，无有效数据"}
-
+                return ApiResponse(code=-1, msg="获取二维码失败，无有效数据")
         except Exception as e:
-            return {"code": -1, "msg": f"获取二维码失败: {e}"}
+            return ApiResponse(code=-1, msg=f"获取二维码失败: {e}")
 
     @staticmethod
-    def check_aliyundrive_qrcode_api(request: Request):
+    def check_aliyundrive_qrcode_api(
+        params: CheckAliyunDriveQRCodeParams = Depends(),
+    ) -> ApiResponse[CheckAliyunDriveQRCodeData]:
         """
-        轮询检查二维码的扫描和确认状态
+        轮询检查阿里云盘二维码的扫描和确认状态
         """
-        t_param = request.query_params.get("t")
-        ck_param = request.query_params.get("ck")
         try:
-            data = AliyunPanLogin.ck(t_param, ck_param).get("content")
-            if data["data"]["qrCodeStatus"] == "CONFIRMED":
-                h = data["data"]["bizExt"]
-                c = loads(base64.b64decode(h).decode("gbk"))
+            data = AliyunPanLogin.ck(params.t, params.ck).get("content").get("data")
+            status = data["qrCodeStatus"]
+
+            if status == "CONFIRMED":
+                h = data["bizExt"]
+                c = loads(b64decode(h).decode("gbk"))
                 refresh_token = c["pds_login_result"]["refreshToken"]
                 if refresh_token:
                     configer.update_config({"aliyundrive_token": refresh_token})
                     configer.update_plugin_config()
-                    return {
-                        "code": 0,
-                        "status": "success",
-                        "msg": "登录成功",
-                        "token": refresh_token,
-                    }
-                return {
-                    "code": -1,
-                    "status": "error",
-                    "msg": "登录成功但未能获取Token",
-                }
-            elif data["data"]["qrCodeStatus"] == "EXPIRED":
-                return {"code": -1, "status": "error", "msg": "二维码无效或已过期"}
-            elif data["data"]["qrCodeStatus"] == "CANCELED":
-                return {"code": -1, "status": "error", "msg": "用户取消登录"}
-            elif data["data"]["qrCodeStatus"] == "SCANED":
-                return {"code": 0, "status": "scanned", "msg": "请在手机上确认"}
-            else:
-                return {"code": 0, "status": "waiting", "msg": "等待扫码"}
+                    return ApiResponse(
+                        data=CheckAliyunDriveQRCodeData(
+                            status="success", msg="登录成功", token=refresh_token
+                        )
+                    )
+                return ApiResponse(code=-1, msg="登录成功但未能获取Token")
+            elif status == "EXPIRED":
+                return ApiResponse(code=-1, msg="二维码无效或已过期")
+            elif status == "CANCELED":
+                return ApiResponse(code=-1, msg="用户取消登录")
+            elif status == "SCANED":
+                return ApiResponse(
+                    data=CheckAliyunDriveQRCodeData(
+                        status="scanned", msg="请在手机上确认"
+                    )
+                )
+            else:  # WAITING
+                return ApiResponse(
+                    data=CheckAliyunDriveQRCodeData(status="waiting", msg="等待扫码")
+                )
         except Exception as e:
-            return {"code": -1, "msg": f"检查状态时出错: {e}"}
+            return ApiResponse(code=-1, msg=f"检查状态时出错: {e}")
+
+    @staticmethod
+    def _create_error_response(
+        message: str, status_code: int = status.HTTP_400_BAD_REQUEST
+    ) -> JSONResponse:
+        """
+        创建一个标准化的 JSON 错误响应
+        """
+        return JSONResponse(
+            status_code=status_code, content={"code": -1, "msg": message, "data": None}
+        )
 
     @staticmethod
     def redirect_url(
@@ -556,7 +555,7 @@ class Api:
         id: int = 0,
         share_code: str = "",
         receive_code: str = "",
-    ):
+    ) -> Response:
         """
         115网盘302跳转
         """
@@ -568,7 +567,9 @@ class Api:
                 if not receive_code:
                     receive_code = servicer.redirect.get_receive_code(share_code)
                 elif len(receive_code) != 4:
-                    return f"Bad receive_code: {receive_code}"
+                    return Api._create_error_response(
+                        f"Bad receive_code: {receive_code}"
+                    )
                 if not id:
                     if file_name:
                         id = servicer.redirect.share_get_id_for_name(
@@ -577,22 +578,29 @@ class Api:
                             file_name,
                         )
                 if not id:
-                    return f"Please specify id or name: share_code={share_code!r}"
+                    return Api._create_error_response(
+                        f"Please specify id or name for share_code={share_code!r}"
+                    )
                 url = servicer.redirect.get_share_downurl(
                     share_code, receive_code, id, user_agent
                 )
                 logger.info(f"【302跳转服务】获取 115 下载地址成功: {url}")
             except Exception as e:
-                logger.error(f"【302跳转服务】获取 115 下载地址失败: {e}")
-                return f"获取 115 下载地址失败: {e}"
+                error_message = f"获取 115 分享下载地址失败: {e}"
+                logger.error(f"【302跳转服务】{error_message}")
+                return Api._create_error_response(
+                    error_message, status_code=status.HTTP_500_INTERNAL_SERVER_ERROR
+                )
         else:
             if not pickcode:
                 logger.debug("【302跳转服务】Missing pickcode parameter")
-                return "Missing pickcode parameter"
+                return Api._create_error_response("Missing pickcode parameter")
 
             if not (len(pickcode) == 17 and pickcode.isalnum()):
                 logger.debug(f"【302跳转服务】Bad pickcode: {pickcode} {file_name}")
-                return f"Bad pickcode: {pickcode} {file_name}"
+                return Api._create_error_response(
+                    f"Bad pickcode: {pickcode} {file_name}"
+                )
 
             try:
                 if configer.get_config("link_redirect_mode") == "cookie":
@@ -607,11 +615,14 @@ class Api:
                     f"【302跳转服务】获取 115 下载地址成功: {url} {url['file_name']}"  # pylint: disable=E1126
                 )
             except Exception as e:
-                logger.error(f"【302跳转服务】获取 115 下载地址失败: {e}")
-                return f"获取 115 下载地址失败: {e}"
+                error_message = f"获取 115 下载地址失败: {e}"
+                logger.error(f"【302跳转服务】{error_message}")
+                return Api._create_error_response(
+                    error_message, status_code=status.HTTP_500_INTERNAL_SERVER_ERROR
+                )
 
         return Response(
-            status_code=302,
+            status_code=status.HTTP_302_FOUND,
             headers={
                 "Location": url,
                 "Content-Disposition": f'attachment; filename="{quote(url["file_name"])}"',
@@ -621,67 +632,59 @@ class Api:
         )
 
     @staticmethod
-    def trigger_full_sync_api(self) -> Dict:
+    def trigger_full_sync_api() -> ApiResponse:
         """
         触发全量同步
         """
         try:
             if not configer.get_config("enabled") or not configer.get_config("cookies"):
-                return {"code": 1, "msg": "插件未启用或未配置cookie"}
-
+                return ApiResponse(code=1, msg="插件未启用或未配置cookie")
             servicer.start_full_sync()
-
-            return {"code": 0, "msg": "全量同步任务已启动"}
+            return ApiResponse(msg="全量同步任务已启动")
         except Exception as e:
-            return {"code": 1, "msg": f"启动全量同步任务失败: {str(e)}"}
+            return ApiResponse(code=1, msg=f"启动全量同步任务失败: {str(e)}")
 
     @staticmethod
-    def trigger_full_sync_db_api() -> Dict:
+    def trigger_full_sync_db_api() -> ApiResponse:
         """
         触发全量同步数据库
         """
         try:
             if not configer.get_config("enabled") or not configer.get_config("cookies"):
-                return {"code": 1, "msg": "插件未启用或未配置cookie"}
-
+                return ApiResponse(code=1, msg="插件未启用或未配置cookie")
             servicer.start_full_sync_db()
-
-            return {"code": 0, "msg": "全量同步数据库任务已启动"}
+            return ApiResponse(msg="全量同步数据库任务已启动")
         except Exception as e:
-            return {"code": 1, "msg": f"启动全量同步数据库任务失败: {str(e)}"}
+            return ApiResponse(code=1, msg=f"启动全量同步数据库任务失败: {str(e)}")
 
     @staticmethod
-    def trigger_share_sync_api() -> Dict:
+    def trigger_share_sync_api() -> ApiResponse:
         """
         触发分享同步
         """
         try:
             if not configer.get_config("enabled") or not configer.get_config("cookies"):
-                return {"code": 1, "msg": "插件未启用或未配置cookie"}
-
+                return ApiResponse(code=1, msg="插件未启用或未配置cookie")
             if not configer.get_config("user_share_link") and not (
                 configer.get_config("user_share_code")
                 and configer.get_config("user_receive_code")
             ):
-                return {"code": 1, "msg": "未配置分享链接或分享码"}
-
+                return ApiResponse(code=1, msg="未配置分享链接或分享码")
             servicer.start_share_sync()
-
-            return {"code": 0, "msg": "分享同步任务已启动"}
+            return ApiResponse(msg="分享同步任务已启动")
         except Exception as e:
-            return {"code": 1, "msg": f"启动分享同步任务失败: {str(e)}"}
+            return ApiResponse(code=1, msg=f"启动分享同步任务失败: {str(e)}")
 
     @staticmethod
-    def get_status_api() -> Dict:
+    def get_status_api() -> ApiResponse[PluginStatusData]:
         """
         获取插件状态
         """
-        return {
-            "code": 0,
-            "data": {
-                "enabled": configer.get_config("enabled"),
-                "has_client": bool(servicer.client),
-                "running": (
+        return ApiResponse(
+            data=PluginStatusData(
+                enabled=configer.get_config("enabled"),
+                has_client=bool(servicer.client),
+                running=(
                     bool(servicer.scheduler.get_jobs()) if servicer.scheduler else False
                 )
                 or bool(
@@ -689,8 +692,8 @@ class Api:
                     and servicer.monitor_life_thread.is_alive()
                 )
                 or bool(servicer.service_observer),
-            },
-        }
+            )
+        )
 
     @staticmethod
     def add_transfer_share(share_url: str = "") -> Dict:
@@ -794,12 +797,14 @@ class Api:
         }
 
     @staticmethod
-    def offline_tasks_api(payload: Dict) -> Dict:
+    def offline_tasks_api(
+        payload: OfflineTasksPayload,
+    ) -> ApiResponse[OfflineTasksData]:
         """
         离线任务列表
         """
-        page = int(payload.get("page", 1))
-        limit = int(payload.get("limit", 10))
+        page = payload.page
+        limit = payload.limit
 
         all_tasks = servicer.offlinehelper.get_cached_data()
         total = len(all_tasks)
@@ -811,21 +816,18 @@ class Api:
             end = start + limit
             paginated_tasks = all_tasks[start:end]
 
-        response = {
-            "code": 0,
-            "msg": "获取离线任务成功",
-            "data": {"total": total, "tasks": paginated_tasks},
-        }
-
-        return response
+        return ApiResponse(
+            msg="获取离线任务成功",
+            data=OfflineTasksData(total=total, tasks=paginated_tasks),
+        )
 
     @staticmethod
-    def add_offline_task_api(payload: Dict) -> Dict:
+    def add_offline_task_api(payload: AddOfflineTaskPayload) -> ApiResponse:
         """
         添加离线下载任务
         """
-        links = payload.get("links")
-        path = payload.get("path")
+        links = payload.links
+        path = payload.path
 
         if not path:
             status = servicer.offlinehelper.add_urls_to_transfer(links)
@@ -833,19 +835,14 @@ class Api:
             status = servicer.offlinehelper.add_urls_to_path(links, path)
 
         if status:
-            return {
-                "code": 0,
-                "msg": f"{len(links)} 个新任务已成功添加，正在后台处理。",
-                "data": "",
-            }
-        return {
-            "code": -1,
-            "msg": "添加失败：请前往后台查看插件日志",
-            "data": "",
-        }
+            return ApiResponse(
+                msg=f"{len(payload.links)} 个新任务已成功添加，正在后台处理。"
+            )
+
+        return ApiResponse(code=-1, msg="添加失败：请前往后台查看插件日志")
 
     @staticmethod
-    def check_feature_api(name: str = "") -> Dict:
+    def check_feature_api(name: str = "") -> MachineIDFeature:
         """
         判断是否有权限使用此增强功能
         """

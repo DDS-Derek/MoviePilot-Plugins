@@ -12,6 +12,7 @@ from app.log import logger
 from ..core.config import configer
 from ..core.cache import idpathcacher
 from ..helper.life import MonitorLife
+from ..schemas.offline import OfflineTaskItem
 from ..utils.string import StringUtils
 from ..utils.sentry import sentry_manager
 from ..utils.oopserver import OOPServerRequest
@@ -226,19 +227,19 @@ class OfflineDownloadHelper:
             formatted_tasks = []
 
             for task in raw_tasks:
-                formatted_task = {
-                    "info_hash": task.get("info_hash", ""),
-                    "name": task.get("name", ""),
-                    "size": task.get("size", 0),
-                    "size_text": StringUtils.format_size(task.get("size", 0)),
-                    "status": task.get("status", 0),
-                    "status_text": status_mapping.get(
+                task_model = OfflineTaskItem(
+                    info_hash=task.get("info_hash", ""),
+                    name=task.get("name", ""),
+                    size=task.get("size", 0),
+                    size_text=StringUtils.format_size(task.get("size", 0)),
+                    status=task.get("status", 0),
+                    status_text=status_mapping.get(
                         task.get("status", 4), "未知状态"
                     ),
-                    "percent": task.get("percentDone", 0),
-                    "add_time": task.get("add_time", 0),
-                }
-                formatted_tasks.append(formatted_task)
+                    percent=task.get("percentDone", 0.0),
+                    add_time=task.get("add_time", 0)
+                )
+                formatted_tasks.append(task_model)
 
             self.offline_list_cache = {"data": formatted_tasks, "timestamp": now}
 

@@ -32,3 +32,9 @@ class DownloadValidationFail(Exception):
     下载后的文件未能通过验证
     """
     pass
+
+class FileItemKeyMiss(Exception):
+    """
+    文件数据不完整
+    """
+    pass

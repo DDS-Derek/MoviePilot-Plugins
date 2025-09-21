@@ -141,10 +141,12 @@ class FileDbHelper(DbOper):
             ]
 
     @staticmethod
-    def process_fileitem(fileitem: FileItem) -> List[Dict]:
+    def process_fileitem(fileitem: Optional[FileItem]) -> List[Dict]:
         """
         处理MP fileitem 类型数据
         """
+        if not fileitem:
+            return []
         if fileitem.type == "file":
             return [
                 {

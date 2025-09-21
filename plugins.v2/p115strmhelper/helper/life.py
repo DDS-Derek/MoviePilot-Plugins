@@ -2,7 +2,7 @@ import shutil
 import time
 from collections import defaultdict
 from threading import Timer
-from typing import Dict, Optional, List, Set
+from typing import List, Set
 from pathlib import Path
 from itertools import batched, chain
 
@@ -11,12 +11,15 @@ from ..core.message import post_message
 from ..core.scrape import media_scrape_metadata
 from ..core.cache import idpathcacher, pantransfercacher, lifeeventcacher
 from ..core.i18n import i18n
-from ..utils.path import PathUtils
+from ..utils.path import PathUtils, PathRemoveUtils
 from ..utils.sentry import sentry_manager
 from ..utils.strm import StrmUrlGetter, StrmGenerater
+from ..utils.automaton import AutomatonUtils
+from ..utils.mediainfo_download import MediainfoDownloadMiddleware
 from ..db_manager.oper import FileDbHelper
 from ..helper.mediainfo_download import MediaInfoDownloader
 from ..helper.mediasyncdel import MediaSyncDelHelper
+from ..helper.mediaserver import MediaServerRefresh
 
 from p115client import P115Client
 from p115client.tool.attr import get_path
@@ -27,15 +30,11 @@ from p115client.tool.life import (
     BEHAVIOR_TYPE_TO_NAME,
 )
 
-from app.schemas import NotificationType, ServiceInfo, RefreshMediaItem, FileItem
+from app.schemas import NotificationType, FileItem
 from app.log import logger
-from app.helper.mediaserver import MediaServerHelper
 from app.core.config import settings
-from app.core.metainfo import MetaInfoPath
-from app.utils.system import SystemUtils
 from app.chain.storage import StorageChain
 from app.chain.transfer import TransferChain
-from app.chain.media import MediaChain
 
 
 @sentry_manager.capture_all_class_exceptions
@@ -78,6 +77,20 @@ class MonitorLife:
         self.rmt_mediaext_set: Set = set()
         self.download_mediaext_set: Set = set()
 
+        self.mdaw = AutomatonUtils.build_automaton(
+            configer.mediainfo_download_whitelist
+        )
+        self.mdab = AutomatonUtils.build_automaton(
+            configer.mediainfo_download_blacklist
+        )
+
+        self.mediaserver_helper = MediaServerRefresh(
+            func_name="【监控生活事件】",
+            enabled=configer.monitor_life_media_server_refresh_enabled,
+            mp_mediaserver=configer.monitor_life_mp_mediaserver_paths,
+            mediaservers=configer.monitor_life_mediaservers,
+        )
+
     def _schedule_notification(self):
         """
         安排通知发送，如果一分钟内没有新事件则发送
@@ -118,89 +131,13 @@ class MonitorLife:
             "mediainfo_count": 0,
         }
 
-    @property
-    def monitor_life_service_infos(self) -> Optional[Dict[str, ServiceInfo]]:
-        """
-        监控生活事件 媒体服务器服务信息
-        """
-        if not configer.get_config("monitor_life_mediaservers"):
-            logger.warning("尚未配置媒体服务器，请检查配置")
-            return None
-
-        mediaserver_helper = MediaServerHelper()
-
-        services = mediaserver_helper.get_services(
-            name_filters=configer.get_config("monitor_life_mediaservers")
-        )
-        if not services:
-            logger.warning("获取媒体服务器实例失败，请检查配置")
-            return None
-
-        active_services = {}
-        for service_name, service_info in services.items():
-            if service_info.instance.is_inactive():
-                logger.warning(f"媒体服务器 {service_name} 未连接，请检查配置")
-            else:
-                active_services[service_name] = service_info
-
-        if not active_services:
-            logger.warning("没有已连接的媒体服务器，请检查配置")
-            return None
-
-        return active_services
-
-    def refresh_mediaserver(self, file_path: str, file_name: str):
-        """
-        刷新媒体服务器
-        """
-        if configer.get_config("monitor_life_media_server_refresh_enabled"):
-            if not self.monitor_life_service_infos:
-                return
-            logger.info(f"【监控生活事件】 {file_name} 开始刷新媒体服务器")
-            if configer.get_config("monitor_life_mp_mediaserver_paths"):
-                status, mediaserver_path, moviepilot_path = PathUtils.get_media_path(
-                    configer.get_config("monitor_life_mp_mediaserver_paths"),
-                    file_path,
-                )
-                if status:
-                    logger.info(
-                        f"【监控生活事件】 {file_name} 刷新媒体服务器目录替换中..."
-                    )
-                    file_path = file_path.replace(
-                        moviepilot_path, mediaserver_path
-                    ).replace("\\", "/")
-                    logger.info(
-                        f"【监控生活事件】刷新媒体服务器目录替换: {moviepilot_path} --> {mediaserver_path}"
-                    )
-                    logger.info(f"【监控生活事件】刷新媒体服务器目录: {file_path}")
-            mediachain = MediaChain()
-            meta = MetaInfoPath(path=Path(file_path))
-            mediainfo = mediachain.recognize_media(meta=meta)
-            if not mediainfo:
-                logger.warning(f"【监控生活事件】{file_name} 无法刷新媒体库")
-                return
-            items = [
-                RefreshMediaItem(
-                    title=mediainfo.title,
-                    year=mediainfo.year,
-                    type=mediainfo.type,
-                    category=mediainfo.category,
-                    target_path=Path(file_path),
-                )
-            ]
-            for name, service in self.monitor_life_service_infos.items():
-                if hasattr(service.instance, "refresh_library_by_items"):
-                    service.instance.refresh_library_by_items(items)
-                elif hasattr(service.instance, "refresh_root_library"):
-                    service.instance.refresh_root_library()
-                else:
-                    logger.warning(f"【监控生活事件】{file_name} {name} 不支持刷新")
-
     def _get_path_by_cid(self, cid: int):
         """
         通过 cid 获取路径
         先从缓存获取，再从数据库获取，最后通过API获取
         """
+        if int(cid) == 0:
+            return Path("/")
         _databasehelper = FileDbHelper()
         dir_path = idpathcacher.get_dir_by_id(cid)
         if not dir_path:
@@ -211,7 +148,7 @@ class MonitorLife:
                     logger.debug(f"获取 {cid} 路径（数据库）: {dir_path}")
                     idpathcacher.add_cache(id=cid, directory=str(dir_path))
                     return Path(dir_path)
-            dir_path = get_path(client=self._client, cid=cid, root_id=None)
+            dir_path = get_path(client=self._client, attr=cid, root_id=None)
             idpathcacher.add_cache(id=cid, directory=str(dir_path))
             if not dir_path:
                 logger.error(f"获取 {cid} 路径失败")
@@ -398,6 +335,21 @@ class MonitorLife:
                             "monitor_life_auto_download_mediainfo_enabled"
                         ):
                             if file_path.suffix.lower() in self.download_mediaext_set:
+                                if not (
+                                    result
+                                    := MediainfoDownloadMiddleware.should_download(
+                                        filename=original_file_name,
+                                        blacklist_automaton=self.mdab,
+                                        whitelist_automaton=self.mdaw,
+                                    )
+                                )[1]:
+                                    logger.warning(
+                                        "【监控生活事件】%s，跳过网盘路径: %s",
+                                        result[0],
+                                        item["path"],
+                                    )
+                                    continue
+
                                 pickcode = item["pickcode"]
                                 if not pickcode:
                                     logger.error(
@@ -487,8 +439,9 @@ class MonitorLife:
                                     path=new_file_path,
                                 )
                         # 刷新媒体服务器
-                        self.refresh_mediaserver(
-                            str(new_file_path), str(original_file_name)
+                        self.mediaserver_helper.refresh_mediaserver(
+                            file_path=str(new_file_path),
+                            file_name=str(original_file_name),
                         )
                 _databasehelper.upsert_batch(processed)
             if configer.get_config("notify"):
@@ -516,6 +469,20 @@ class MonitorLife:
 
                 if configer.get_config("monitor_life_auto_download_mediainfo_enabled"):
                     if file_path.suffix.lower() in self.download_mediaext_set:
+                        if not (
+                            result := MediainfoDownloadMiddleware.should_download(
+                                filename=original_file_name,
+                                blacklist_automaton=self.mdab,
+                                whitelist_automaton=self.mdaw,
+                            )
+                        )[1]:
+                            logger.warning(
+                                "【监控生活事件】%s，跳过网盘路径: %s",
+                                result[0],
+                                str(file_path).replace(str(target_dir), "", 1),
+                            )
+                            return
+
                         if not pickcode:
                             logger.error(
                                 f"【监控生活事件】{original_file_name} 不存在 pickcode 值，无法下载该文件"
@@ -615,34 +582,15 @@ class MonitorLife:
                             path=new_file_path,
                         )
                 # 刷新媒体服务器
-                self.refresh_mediaserver(str(new_file_path), str(original_file_name))
+                self.mediaserver_helper.refresh_mediaserver(
+                    file_path=new_file_path.as_posix(),
+                    file_name=str(original_file_name),
+                )
 
     def remove_strm(self, event):
         """
         删除 STRM 文件
         """
-
-        def __remove_parent_dir(file_path: Path):
-            """
-            删除父目录
-            """
-            # 删除空目录
-            # 判断当前媒体父路径下是否有媒体文件，如有则无需遍历父级
-            if not SystemUtils.exits_files(file_path.parent, ["strm"]):
-                # 判断父目录是否为空, 为空则删除
-                i = 0
-                for parent_path in file_path.parents:
-                    i += 1
-                    if i > 3:
-                        break
-                    if str(parent_path.parent) != str(file_path.root):
-                        # 父目录非根目录，才删除父目录
-                        if not SystemUtils.exits_files(parent_path, ["strm"]):
-                            # 当前路径下没有媒体文件则删除
-                            shutil.rmtree(parent_path)
-                            logger.warn(
-                                f"【监控生活事件】本地空目录 {parent_path} 已删除"
-                            )
 
         # def __get_file_path(
         #     file_name: str, file_size: str, file_id: str, file_category: int
@@ -744,7 +692,11 @@ class MonitorLife:
                 # 删除文件
                 Path(file_path).unlink(missing_ok=True)
                 # 判断父目录是否需要删除
-                __remove_parent_dir(Path(file_path))
+                PathRemoveUtils.remove_parent_dir(
+                    file_path=Path(file_path),
+                    mode=["strm"],
+                    func_type="【监控生活事件】",
+                )
             # 清理数据库所有路径
             _databasehelper.remove_by_path_batch(
                 path=str(pan_file_path), only_file=False
@@ -896,7 +848,7 @@ class MonitorLife:
             }
 
             logger.debug(
-                f"【监控生活事件】{BEHAVIOR_TYPE_TO_NAME[event['type']]}: {event}"
+                f"【监控生活事件】{BEHAVIOR_TYPE_TO_NAME.get(event['type'], '未知类型')}: {event}"
             )
 
             if (

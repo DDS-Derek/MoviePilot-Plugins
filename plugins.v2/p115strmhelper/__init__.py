@@ -8,11 +8,9 @@ from typing import Any, List, Dict, Tuple, Optional, Union
 
 from app.chain.storage import StorageChain
 from app.core.event import eventmanager, Event
-from app.core.metainfo import MetaInfoPath
 from app.log import logger
 from app.plugins import _PluginBase
-from app.chain.media import MediaChain
-from app.schemas import TransferInfo, FileItem, RefreshMediaItem
+from app.schemas import TransferInfo, FileItem
 from app.schemas.types import EventType, MessageChannel
 from apscheduler.triggers.cron import CronTrigger
 from fastapi import Request
@@ -104,9 +102,7 @@ class P115StrmHelper(_PluginBase):
         configer.load_from_dict(config or {})
 
         if not Path(configer.PLUGIN_TEMP_PATH).exists():
-            Path(configer.PLUGIN_TEMP_PATH).mkdir(
-                parents=True, exist_ok=True
-            )
+            Path(configer.PLUGIN_TEMP_PATH).mkdir(parents=True, exist_ok=True)
 
         # 初始化数据库
         self.init_database()
@@ -156,9 +152,7 @@ class P115StrmHelper(_PluginBase):
         初始化数据库
         """
         if not Path(configer.PLUGIN_CONFIG_PATH).exists():
-            Path(configer.PLUGIN_CONFIG_PATH).mkdir(
-                parents=True, exist_ok=True
-            )
+            Path(configer.PLUGIN_CONFIG_PATH).mkdir(parents=True, exist_ok=True)
         if not ct_db_manager.is_initialized():
             # 初始化数据库会话
             ct_db_manager.init_database(db_path=configer.PLUGIN_DB_PATH)
@@ -427,24 +421,19 @@ class P115StrmHelper(_PluginBase):
                 {
                     "id": "P115StrmHelper_full_sync_strm_files",
                     "name": "定期全量同步115媒体库",
-                    "trigger": CronTrigger.from_crontab(
-                        configer.cron_full_sync_strm
-                    ),
+                    "trigger": CronTrigger.from_crontab(configer.cron_full_sync_strm),
                     "func": servicer.full_sync_strm_files,
                     "kwargs": {},
                 }
             )
         if configer.cron_clear and (
-            configer.clear_recyclebin_enabled
-            or configer.clear_receive_path_enabled
+            configer.clear_recyclebin_enabled or configer.clear_receive_path_enabled
         ):
             cron_service.append(
                 {
                     "id": "P115StrmHelper_main_cleaner",
                     "name": "定期清理115空间",
-                    "trigger": CronTrigger.from_crontab(
-                        configer.cron_clear
-                    ),
+                    "trigger": CronTrigger.from_crontab(configer.cron_clear),
                     "func": servicer.main_cleaner,
                     "kwargs": {},
                 }
@@ -458,9 +447,7 @@ class P115StrmHelper(_PluginBase):
                 {
                     "id": "P115StrmHelper_increment_sync_strm",
                     "name": "115网盘定期增量同步",
-                    "trigger": CronTrigger.from_crontab(
-                        configer.increment_sync_cron
-                    ),
+                    "trigger": CronTrigger.from_crontab(configer.increment_sync_cron),
                     "func": servicer.increment_sync_strm_files,
                     "kwargs": {},
                 }
@@ -928,58 +915,6 @@ class P115StrmHelper(_PluginBase):
         处理115生活事件生成MP整理STRM文件名称错误
         """
 
-        def refresh_mediaserver(file_path: str, file_name: str):
-            """
-            刷新媒体服务器
-            """
-            if configer.monitor_life_media_server_refresh_enabled:
-                if not servicer.monitorlife.monitor_life_service_infos:
-                    return
-                logger.info(f"【监控生活事件】 {file_name} 开始刷新媒体服务器")
-                if configer.monitor_life_mp_mediaserver_paths:
-                    status, mediaserver_path, moviepilot_path = (
-                        PathUtils.get_media_path(
-                            configer.monitor_life_mp_mediaserver_paths,
-                            file_path,
-                        )
-                    )
-                    if status:
-                        logger.info(
-                            f"【监控生活事件】 {file_name} 刷新媒体服务器目录替换中..."
-                        )
-                        file_path = file_path.replace(
-                            moviepilot_path, mediaserver_path
-                        ).replace("\\", "/")
-                        logger.info(
-                            f"【监控生活事件】刷新媒体服务器目录替换: {moviepilot_path} --> {mediaserver_path}"
-                        )
-                        logger.info(f"【监控生活事件】刷新媒体服务器目录: {file_path}")
-                mediachain = MediaChain()
-                meta = MetaInfoPath(path=Path(file_path))
-                mediainfo = mediachain.recognize_media(meta=meta)
-                if not mediainfo:
-                    logger.warning(f"【监控生活事件】{file_name} 无法刷新媒体库")
-                    return
-                items = [
-                    RefreshMediaItem(
-                        title=mediainfo.title,
-                        year=mediainfo.year,
-                        type=mediainfo.type,
-                        category=mediainfo.category,
-                        target_path=Path(file_path),
-                    )
-                ]
-                for (
-                    name,
-                    service,
-                ) in servicer.monitorlife.monitor_life_service_infos.items():
-                    if hasattr(service.instance, "refresh_library_by_items"):
-                        service.instance.refresh_library_by_items(items)
-                    elif hasattr(service.instance, "refresh_root_library"):
-                        service.instance.refresh_root_library()
-                    else:
-                        logger.warning(f"【监控生活事件】{file_name} {name} 不支持刷新")
-
         def file_rename(fileitem: FileItem, refresh: bool = False):
             """
             重命名
@@ -1020,7 +955,7 @@ class P115StrmHelper(_PluginBase):
                         f"【监控生活事件】修正文件名称: {life_path} --> {target_file_path}"
                     )
                     if refresh:
-                        refresh_mediaserver(
+                        servicer.monitorlife.mediaserver_helper.refresh_mediaserver(
                             file_path=Path(target_file_path).as_posix(),
                             file_name=str(target_file_path.name),
                         )

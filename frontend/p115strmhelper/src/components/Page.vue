@@ -903,7 +903,6 @@ const props = defineProps({
     type: [Object, Function],
     required: true
   },
-  // 接收从父组件传递的配置数据
   initialConfig: {
     type: Object,
     default: () => ({})
@@ -920,16 +919,11 @@ const parseSize = (sizeString) => {
   const num = parseFloat(match[1]);
   const unit = (match[2] || '').toLowerCase();
   switch (unit) {
-    case 't':
-      return Math.round(num * 1024 * 1024 * 1024 * 1024);
-    case 'g':
-      return Math.round(num * 1024 * 1024 * 1024);
-    case 'm':
-      return Math.round(num * 1024 * 1024);
-    case 'k':
-      return Math.round(num * 1024);
-    default:
-      return Math.round(num);
+    case 't': return Math.round(num * 1024 * 1024 * 1024 * 1024);
+    case 'g': return Math.round(num * 1024 * 1024 * 1024);
+    case 'm': return Math.round(num * 1024 * 1024);
+    case 'k': return Math.round(num * 1024);
+    default: return Math.round(num);
   }
 };
 
@@ -981,7 +975,6 @@ const storageInfo = reactive({
   loading: true
 });
 
-// 离线下载对话框状态
 const offlineDownloadDialog = reactive({
   show: false,
   activeTab: 'tasks',
@@ -1002,10 +995,8 @@ const offlineDownloadDialog = reactive({
   destPath: '',
 });
 
-// 辅助函数，用于计算存储百分比
 const calculateStoragePercentage = (used, total) => {
   if (!used || !total) return 0;
-
   const parseSize = (sizeStr) => {
     if (!sizeStr || typeof sizeStr !== 'string') return 0;
     const value = parseFloat(sizeStr);
@@ -1015,37 +1006,27 @@ const calculateStoragePercentage = (used, total) => {
     if (sizeStr.toUpperCase().includes('MB')) return value;
     return value;
   };
-
   const usedValue = parseSize(used);
   const totalValue = parseSize(total);
-
   if (totalValue === 0) return 0;
   return Math.min(Math.max((usedValue / totalValue) * 100, 0), 100);
 };
 
-// 计算属性：路径配置是否完整
 const isProperlyCongifured = computed(() => {
   if (!props.initialConfig) return false;
-
   const hasBasicConfig = props.initialConfig.enabled && props.initialConfig.cookies && props.initialConfig.moviepilot_address;
   if (!hasBasicConfig) return false;
-
-  // 至少一个功能区域配置了路径
   const hasTransferPaths = getPathsCount(props.initialConfig.transfer_monitor_paths) > 0 && props.initialConfig.transfer_monitor_enabled;
   const hasFullSyncPaths = getPathsCount(props.initialConfig.full_sync_strm_paths) > 0 && (props.initialConfig.timing_full_sync_strm);
   const hasIncrementSyncPaths = getPathsCount(props.initialConfig.increment_sync_strm_paths) > 0 && (props.initialConfig.increment_sync_strm_enabled);
   const hasLifePaths = getPathsCount(props.initialConfig.monitor_life_paths) > 0 && props.initialConfig.monitor_life_enabled;
   const hasSharePaths = props.initialConfig.user_share_local_path && props.initialConfig.user_share_pan_path;
-
   return hasTransferPaths || hasFullSyncPaths || hasIncrementSyncPaths || hasLifePaths || hasSharePaths;
 });
 
-// 计算路径数量
 const getPathsCount = (pathString) => {
   if (!pathString) return 0;
-
   try {
-    // 根据换行符拆分路径字符串，并过滤掉空行
     const paths = pathString.split('\n').filter(line => line.trim() && line.includes('#'));
     return paths.length;
   } catch (e) {
@@ -1054,7 +1035,6 @@ const getPathsCount = (pathString) => {
   }
 };
 
-// 新增：获取网盘整理路径数量的辅助函数
 const getPanTransferPathsCount = (pathString) => {
   if (!pathString) return 0;
   try {
@@ -1066,47 +1046,33 @@ const getPanTransferPathsCount = (pathString) => {
   }
 };
 
-// 获取插件状态
 const getStatus = async () => {
   loading.value = true;
   error.value = null;
-
   try {
-    // 获取插件ID
     const pluginId = "P115StrmHelper";
-
-    // 调用API获取状态
     const result = await props.api.get(`plugin/${pluginId}/get_status`);
-
+    // 此处 result.data 的访问方式与新模型兼容，无需修改
     if (result && result.code === 0 && result.data) {
-      // 确保从API获取实际状态，而不是使用默认值
       status.enabled = Boolean(result.data.enabled);
       status.has_client = Boolean(result.data.has_client);
       status.running = Boolean(result.data.running);
-
-      // 同时获取并更新配置信息到props.initialConfig
       try {
         const configData = await props.api.get(`plugin/${pluginId}/get_config`);
         if (configData) {
-          // 更新配置对象
           Object.assign(props.initialConfig, configData);
           console.log('已获取最新配置:', props.initialConfig);
         }
       } catch (configErr) {
         console.error('获取配置失败:', configErr);
       }
-
       initialDataLoaded.value = true;
     } else {
-      // 如果API调用失败但有initialConfig，使用它的状态
       if (props.initialConfig) {
         status.enabled = Boolean(props.initialConfig.enabled);
-        // 检查是否真的有有效的Cookie
         status.has_client = Boolean(props.initialConfig.cookies && props.initialConfig.cookies.trim() !== '');
         status.running = false;
         initialDataLoaded.value = true;
-
-        // 如果initialConfig是空的，尝试获取配置
         if (Object.keys(props.initialConfig).length <= 1) {
           try {
             const configData = await props.api.get(`plugin/${pluginId}/get_config`);
@@ -1118,7 +1084,6 @@ const getStatus = async () => {
             console.error('获取配置失败:', configErr);
           }
         }
-
         throw new Error('状态API调用失败，使用配置数据显示状态');
       } else {
         throw new Error(result?.msg || '获取状态失败，请检查网络连接');
@@ -1134,7 +1099,6 @@ const getStatus = async () => {
   }
 };
 
-// 刷新状态
 const refreshStatus = async () => {
   refreshing.value = true;
   await getStatus();
@@ -1152,19 +1116,14 @@ const refreshStatus = async () => {
     }
   }
   refreshing.value = false;
-
   actionMessage.value = '状态已刷新';
   actionMessageType.value = 'success';
-
-  // 3秒后清除消息
-  setTimeout(() => {
-    actionMessage.value = null;
-  }, 3000);
+  setTimeout(() => { actionMessage.value = null; }, 3000);
 };
 
 const handleConfirmFullSync = async () => {
-  fullSyncConfirmDialog.value = false; // 先关闭对话框
-  await triggerFullSync(); // 然后执行原始的同步函数
+  fullSyncConfirmDialog.value = false;
+  await triggerFullSync();
 };
 
 const handleConfirmFullSyncDb = async () => {
@@ -1172,37 +1131,20 @@ const handleConfirmFullSyncDb = async () => {
   await triggerFullSyncDb();
 };
 
-// 触发全量同步
 const triggerFullSync = async () => {
   syncLoading.value = true;
   actionLoading.value = true;
   error.value = null;
   actionMessage.value = null;
-
   try {
-    // 检查状态
-    if (!status.enabled) {
-      throw new Error('插件未启用，请先在配置页面启用插件');
-    }
-
-    if (!status.has_client) {
-      throw new Error('插件未配置Cookie或Cookie无效，请先在配置页面设置115 Cookie');
-    }
-
-    if (getPathsCount(props.initialConfig?.full_sync_strm_paths) === 0) {
-      throw new Error('未配置全量同步路径，请先在配置页面设置同步路径');
-    }
-
-    // 获取插件ID
+    if (!status.enabled) throw new Error('插件未启用，请先在配置页面启用插件');
+    if (!status.has_client) throw new Error('插件未配置Cookie或Cookie无效，请先在配置页面设置115 Cookie');
+    if (getPathsCount(props.initialConfig?.full_sync_strm_paths) === 0) throw new Error('未配置全量同步路径，请先在配置页面设置同步路径');
     const pluginId = "P115StrmHelper";
-
-    // 调用API触发全量同步
     const result = await props.api.post(`plugin/${pluginId}/full_sync`);
-
     if (result && result.code === 0) {
       actionMessage.value = result.msg || '全量同步任务已启动';
       actionMessageType.value = 'success';
-      // 刷新状态
       await getStatus();
     } else {
       throw new Error(result?.msg || '启动全量同步失败');
@@ -1216,33 +1158,19 @@ const triggerFullSync = async () => {
   }
 };
 
-// 触发全量同步数据库
 const triggerFullSyncDb = async () => {
   syncDbLoading.value = true;
   actionLoading.value = true;
   error.value = null;
   actionMessage.value = null;
-
   try {
-    // 检查状态
-    if (!status.enabled) {
-      throw new Error('插件未启用，请先在配置页面启用插件');
-    }
-
-    if (!status.has_client) {
-      throw new Error('插件未配置Cookie或Cookie无效，请先在配置页面设置115 Cookie');
-    }
-
-    // 获取插件ID
+    if (!status.enabled) throw new Error('插件未启用，请先在配置页面启用插件');
+    if (!status.has_client) throw new Error('插件未配置Cookie或Cookie无效，请先在配置页面设置115 Cookie');
     const pluginId = "P115StrmHelper";
-
-    // 调用API触发全量同步数据库
     const result = await props.api.post(`plugin/${pluginId}/full_sync_db`);
-
     if (result && result.code === 0) {
       actionMessage.value = result.msg || '全量同步数据库任务已启动';
       actionMessageType.value = 'success';
-      // 刷新状态
       await getStatus();
     } else {
       throw new Error(result?.msg || '启动全量同步数据库失败');
@@ -1256,7 +1184,6 @@ const triggerFullSyncDb = async () => {
   }
 };
 
-// 分享同步对话框
 const shareDialog = reactive({
   show: false,
   error: null,
@@ -1269,19 +1196,13 @@ const shareDialog = reactive({
   shareMinFileSizeFormatted: '',
 });
 
-// 计算属性：分享对话框是否填写有效
 const isShareDialogValid = computed(() => {
-  // 必须有本地路径
   if (!shareDialog.localPath) return false;
-
-  // 必须有分享链接或分享码，如果有分享码则必须有分享密码
   if (!shareDialog.shareLink && !shareDialog.shareCode) return false;
   if (shareDialog.shareCode && !shareDialog.receiveCode) return false;
-
   return true;
 });
 
-// 目录选择器对话框
 const dirDialog = reactive({
   show: false,
   isLocal: true,
@@ -1293,12 +1214,9 @@ const dirDialog = reactive({
   callback: null
 });
 
-// 打开分享同步对话框
 const openShareDialog = () => {
   shareDialog.show = true;
   shareDialog.error = null;
-
-  // 从配置中加载值
   if (props.initialConfig) {
     shareDialog.shareLink = props.initialConfig.user_share_link || '';
     shareDialog.shareCode = props.initialConfig.user_share_code || '';
@@ -1310,64 +1228,34 @@ const openShareDialog = () => {
   }
 };
 
-// 关闭分享同步对话框
-const closeShareDialog = () => {
-  shareDialog.show = false;
-};
+const closeShareDialog = () => { shareDialog.show = false; };
 
-// 打开目录选择器
 const openShareDirSelector = (type) => {
   dirDialog.show = true;
   dirDialog.isLocal = type === 'local';
   dirDialog.loading = false;
   dirDialog.error = null;
   dirDialog.items = [];
-
-  // 设置初始路径
-  if (dirDialog.isLocal) {
-    dirDialog.currentPath = shareDialog.localPath || '/';
-  } else {
-    dirDialog.currentPath = shareDialog.panPath || '/';
-  }
-
-  // 设置回调函数
+  dirDialog.currentPath = dirDialog.isLocal ? (shareDialog.localPath || '/') : (shareDialog.panPath || '/');
   dirDialog.callback = (path) => {
-    if (dirDialog.isLocal) {
-      shareDialog.localPath = path;
-    } else {
-      shareDialog.panPath = path;
-    }
+    if (dirDialog.isLocal) shareDialog.localPath = path;
+    else shareDialog.panPath = path;
   };
-
-  // 加载目录内容
   loadDirContent();
 };
 
-// 加载目录内容
 const loadDirContent = async () => {
   dirDialog.loading = true;
   dirDialog.error = null;
   dirDialog.items = [];
-
   try {
-    // 本地目录浏览
     if (dirDialog.isLocal) {
       try {
-        // 使用MoviePilot的文件管理API
-        const response = await props.api.post('storage/list', {
-          path: dirDialog.currentPath || '/',
-          type: 'share', // 使用默认的share类型
-          flag: 'ROOT'
-        });
-
+        const response = await props.api.post('storage/list', { path: dirDialog.currentPath || '/', type: 'share', flag: 'ROOT' });
         if (response && Array.isArray(response)) {
           dirDialog.items = response
-            .filter(item => item.type === 'dir') // 只保留目录
-            .map(item => ({
-              name: item.name,
-              path: item.path,
-              is_dir: true
-            }))
+            .filter(item => item.type === 'dir')
+            .map(item => ({ name: item.name, path: item.path, is_dir: true }))
             .sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: 'base' }));
         } else {
           throw new Error('浏览目录失败：无效响应');
@@ -1377,23 +1265,16 @@ const loadDirContent = async () => {
         dirDialog.error = `浏览本地目录失败: ${error.message || '未知错误'}`;
         dirDialog.items = [];
       }
-    }
-    // 115网盘目录浏览
-    else {
-      // 获取插件ID
+    } else {
       const pluginId = "P115StrmHelper";
-
-      // 检查cookie是否已设置
       if (!props.initialConfig?.cookies || props.initialConfig?.cookies.trim() === '') {
         throw new Error('请先设置115 Cookie才能浏览网盘目录');
       }
-
-      // 调用API获取目录内容
       const result = await props.api.get(`plugin/${pluginId}/browse_dir?path=${encodeURIComponent(dirDialog.currentPath)}&is_local=${dirDialog.isLocal}`);
-
-      if (result && result.code === 0 && result.items) {
-        dirDialog.items = result.items.filter(item => item.is_dir); // 只保留目录
-        dirDialog.currentPath = result.path || dirDialog.currentPath;
+      // 修改点: 从 result.data 中获取核心数据
+      if (result && result.code === 0 && result.data) {
+        dirDialog.items = result.data.items.filter(item => item.is_dir);
+        dirDialog.currentPath = result.data.path || dirDialog.currentPath;
       } else {
         throw new Error(result?.msg || '获取网盘目录内容失败');
       }
@@ -1401,8 +1282,6 @@ const loadDirContent = async () => {
   } catch (error) {
     console.error('加载目录内容失败:', error);
     dirDialog.error = error.message || '获取目录内容失败';
-
-    // 如果是Cookie错误，清空目录列表
     if (error.message.includes('Cookie') || error.message.includes('cookie')) {
       dirDialog.items = [];
     }
@@ -1411,114 +1290,66 @@ const loadDirContent = async () => {
   }
 };
 
-// 选择目录
 const selectDir = (item) => {
   if (!item || !item.is_dir) return;
-
   if (item.path) {
     dirDialog.currentPath = item.path;
     loadDirContent();
   }
 };
 
-// 导航到父目录
 const navigateToParentDir = () => {
   const path = dirDialog.currentPath;
-
-  // If it's a remote path (115 Pan), use simple, explicit POSIX path logic.
-  // This prevents any Windows-style path contamination.
   if (!dirDialog.isLocal) {
-    if (path === '/') return; // Already at root
-
-    // Normalize and remove any trailing slash (unless it's the root)
+    if (path === '/') return;
     let current = path.replace(/\\/g, '/');
-    if (current.length > 1 && current.endsWith('/')) {
-      current = current.slice(0, -1);
-    }
-
+    if (current.length > 1 && current.endsWith('/')) current = current.slice(0, -1);
     const parent = current.substring(0, current.lastIndexOf('/'));
-
-    // If the parent is empty, it means we were in a top-level directory (e.g., '/movies'), so the parent is the root.
     dirDialog.currentPath = parent === '' ? '/' : parent;
-
     loadDirContent();
-    return; // IMPORTANT: Stop execution to not use the local path logic below.
+    return;
   }
-
   if (path === '/' || path === 'C:\\' || path === 'C:/') return;
-
-  // 统一使用正斜杠处理路径
   const normalizedPath = path.replace(/\\/g, '/');
   const parts = normalizedPath.split('/').filter(Boolean);
-
   if (parts.length === 0) {
     dirDialog.currentPath = '/';
   } else if (parts.length === 1 && normalizedPath.includes(':')) {
-    // Windows驱动器根目录
     dirDialog.currentPath = parts[0] + ':/';
   } else {
-    // 移除最后一个部分
     parts.pop();
-    dirDialog.currentPath = parts.length === 0 ? '/' :
-      (normalizedPath.startsWith('/') ? '/' : '') +
-      parts.join('/') + '/';
+    dirDialog.currentPath = parts.length === 0 ? '/' : (normalizedPath.startsWith('/') ? '/' : '') + parts.join('/') + '/';
   }
-
   loadDirContent();
 };
 
-// 确认目录选择
 const confirmDirSelection = () => {
   if (!dirDialog.currentPath) return;
-
   let processedPath = dirDialog.currentPath;
-  // 移除末尾的斜杠，除非路径是 "/" 或者类似 "C:/" 的驱动器根目录
-  if (processedPath !== '/' &&
-    !(/^[a-zA-Z]:[\\\/]$/.test(processedPath)) &&
-    (processedPath.endsWith('/') || processedPath.endsWith('\\\\'))) {
+  if (processedPath !== '/' && !(/^[a-zA-Z]:[\\\/]$/.test(processedPath)) && (processedPath.endsWith('/') || processedPath.endsWith('\\\\'))) {
     processedPath = processedPath.slice(0, -1);
   }
-
   if (typeof dirDialog.callback === 'function') {
     dirDialog.callback(processedPath);
   }
-
-  // 关闭对话框
   closeDirDialog();
 };
 
-// 关闭目录选择器对话框
 const closeDirDialog = () => {
   dirDialog.show = false;
   dirDialog.items = [];
   dirDialog.error = null;
 };
 
-// 执行分享同步
 const executeShareSync = async () => {
   shareSyncLoading.value = true;
   shareDialog.error = null;
-
   try {
-    // 检查必填项
-    if (!shareDialog.localPath) {
-      throw new Error('请先设置本地生成STRM路径');
-    }
-
-    if (!shareDialog.shareLink && !shareDialog.shareCode) {
-      throw new Error('请输入115网盘分享链接或分享码');
-    }
-
-    if (shareDialog.shareCode && !shareDialog.receiveCode) {
-      throw new Error('使用分享码时必须输入分享密码');
-    }
-
-    // 获取插件ID
+    if (!shareDialog.localPath) throw new Error('请先设置本地生成STRM路径');
+    if (!shareDialog.shareLink && !shareDialog.shareCode) throw new Error('请输入115网盘分享链接或分享码');
+    if (shareDialog.shareCode && !shareDialog.receiveCode) throw new Error('使用分享码时必须输入分享密码');
     const pluginId = "P115StrmHelper";
-
-    // 首先保存配置
     if (props.initialConfig) {
-      // 更新配置
       props.initialConfig.user_share_link = shareDialog.shareLink;
       props.initialConfig.user_share_code = shareDialog.shareCode;
       props.initialConfig.user_receive_code = shareDialog.receiveCode;
@@ -1526,22 +1357,13 @@ const executeShareSync = async () => {
       props.initialConfig.user_share_local_path = shareDialog.localPath;
       props.initialConfig.share_strm_auto_download_mediainfo_enabled = shareDialog.downloadMediaInfo;
       props.initialConfig.share_strm_min_file_size = parseSize(shareDialog.shareMinFileSizeFormatted);
-
-      // 保存配置
       await props.api.post(`plugin/${pluginId}/save_config`, props.initialConfig);
     }
-
-    // 调用API触发分享同步
     const result = await props.api.post(`plugin/${pluginId}/share_sync`);
-
     if (result && result.code === 0) {
       actionMessage.value = result.msg || '分享同步任务已启动';
       actionMessageType.value = 'success';
-
-      // 刷新状态
       await getStatus();
-
-      // 关闭对话框
       closeShareDialog();
     } else {
       throw new Error(result?.msg || '启动分享同步失败');
@@ -1554,13 +1376,11 @@ const executeShareSync = async () => {
   }
 };
 
-// 新增：离线下载功能
 const openOfflineDownloadDialog = () => {
   offlineDownloadDialog.show = true;
   offlineDownloadDialog.activeTab = 'tasks';
   offlineDownloadDialog.error = null;
   offlineDownloadDialog.addError = null;
-  // `fetchOfflineTasks` 将被 `v-data-table-server` 的 `update:options` 事件自动触发
 };
 
 const closeOfflineDownloadDialog = () => {
@@ -1613,11 +1433,9 @@ const addOfflineTask = async () => {
     if (result && result.code === 0) {
       actionMessage.value = result.msg || '离线任务添加成功';
       actionMessageType.value = 'success';
-      // 清空表单并切换到任务列表
       offlineDownloadDialog.links = '';
       offlineDownloadDialog.destPath = '';
       offlineDownloadDialog.activeTab = 'tasks';
-      // 刷新任务列表
       fetchOfflineTasks({ page: 1, itemsPerPage: offlineDownloadDialog.itemsPerPage });
     } else {
       throw new Error(result?.msg || '添加离线任务失败');
@@ -1632,37 +1450,30 @@ const addOfflineTask = async () => {
 
 const openOfflineDestDirSelector = () => {
   dirDialog.show = true;
-  dirDialog.isLocal = false; // 网盘目录
+  dirDialog.isLocal = false;
   dirDialog.loading = false;
   dirDialog.error = null;
   dirDialog.items = [];
   dirDialog.currentPath = offlineDownloadDialog.destPath || '/';
-
-  // 设置回调
   dirDialog.callback = (path) => {
     offlineDownloadDialog.destPath = path;
   };
-
   loadDirContent();
 };
 
 const getTaskStatusColor = (status) => {
-  // 0: 进行中, 1: 下载失败, 2: 下载成功, 3: 重试中
   switch (status) {
-    case 0: return 'info';      // 进行中
-    case 1: return 'error';     // 下载失败
-    case 2: return 'success';   // 下载成功
-    case 3: return 'warning';   // 重试中
-    default: return 'grey';   // 未知或默认状态
+    case 0: return 'info';
+    case 1: return 'error';
+    case 2: return 'success';
+    case 3: return 'warning';
+    default: return 'grey';
   }
 };
 
-// 添加路径解析函数
 const getParsedPaths = (pathString) => {
   if (!pathString) return [];
-
   try {
-    // 根据换行符拆分路径字符串，并过滤掉空行
     const paths = pathString.split('\n').filter(line => line.trim() && line.includes('#'));
     return paths.map(path => {
       const parts = path.split('#');
@@ -1674,7 +1485,6 @@ const getParsedPaths = (pathString) => {
   }
 };
 
-// 新增：解析网盘整理路径的辅助函数
 const getParsedPanTransferPaths = (pathString) => {
   if (!pathString) return [];
   try {
@@ -1686,7 +1496,6 @@ const getParsedPanTransferPaths = (pathString) => {
   }
 };
 
-// 当initialConfig变化时更新状态
 watch(() => props.initialConfig, (newConfig) => {
   if (newConfig) {
     status.enabled = newConfig.enabled || false;
@@ -1694,7 +1503,6 @@ watch(() => props.initialConfig, (newConfig) => {
   }
 }, { immediate: true });
 
-// 组件生命周期
 onMounted(async () => {
   await getStatus();
   if (status.has_client && props.initialConfig?.cookies) {
@@ -1717,11 +1525,10 @@ async function fetchUserStorageStatus() {
   userInfo.error = null;
   storageInfo.loading = true;
   storageInfo.error = null;
-
   try {
     const pluginId = "P115StrmHelper";
+    // 此接口未包裹在 ApiResponse 中，保持不变
     const response = await props.api.get(`plugin/${pluginId}/user_storage_status`);
-
     if (response && response.success) {
       if (response.user_info) {
         Object.assign(userInfo, response.user_info);

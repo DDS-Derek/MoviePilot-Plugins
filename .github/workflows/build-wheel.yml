@@ -1,0 +1,206 @@
+# 工作流程名称
+name: 交叉编译 Python Wheels
+
+# 触发条件：只允许手动触发 (workflow_dispatch)
+on:
+  workflow_dispatch:
+    inputs:
+      # 输入参数：依赖包名
+      package_name:
+        description: '需要编译的 PyPI 依赖包名 (例如: pyahocorasick)'
+        required: true
+        type: string
+      # 输入参数：依赖包版本
+      package_version:
+        description: '需要编译的依赖包版本 (例如: 2.1.0)'
+        required: true
+        type: string
+      # 输入参数：Python 版本
+      python_version:
+        description: '用于编译的 Python 版本'
+        required: true
+        default: '3.12.8'
+        type: string
+      # 输入参数：目标平台和架构
+      platforms:
+        description: '编译的目标平台与架构组合，以空格分隔'
+        required: true
+        default: 'windows-amd64 linux-x86_64 linux-i686 linux-aarch64 macos-x86_64 macos-arm64'
+        type: string
+      commit_directory:
+        description: '可选：自定义提交目录。留空则使用默认值 wheels/包名/版本/'
+        required: false
+        default: ''
+        type: string
+
+
+jobs:
+  # 任务0：准备构建矩阵
+  prepare_matrix:
+    # 任务名称
+    name: 准备构建矩阵
+    # 运行环境
+    runs-on: ubuntu-latest
+    # 任务输出
+    outputs:
+      matrix: ${{ steps.generate_matrix.outputs.matrix }}
+    steps:
+      # 步骤1：将输入的字符串转换为一个完整的 matrix JSON 对象
+      - name: 从输入字符串生成矩阵 JSON
+        id: generate_matrix
+        run: |
+          # 使用 jq -c (compact) 和 -R (raw-input) 将空格分隔的字符串转换为单行的原始 JSON 对象
+          # 例如：{"target":["windows-amd64","linux-x86_64"]}
+          JSON_OBJECT=$(echo '${{ inputs.platforms }}' | jq -c -R '{target: split(" ")}')
+          echo "matrix=${JSON_OBJECT}" >> $GITHUB_OUTPUT
+          echo "生成的矩阵对象: ${JSON_OBJECT}"
+
+  # 任务1：获取源码包信息
+  get_source_info:
+    # 任务名称
+    name: 获取源码包下载地址
+    # 运行环境
+    runs-on: ubuntu-latest
+    # 任务输出
+    outputs:
+      sdist_url: ${{ steps.get_url.outputs.sdist_url }}
+      source_dir: ${{ steps.get_url.outputs.source_dir }}
+    steps:
+      # 步骤1：通过 PyPI JSON API 获取信息
+      - name: 从 PyPI JSON API 获取源码包 URL
+        id: get_url
+        run: |
+          PACKAGE_NAME="${{ inputs.package_name }}"
+          PACKAGE_VERSION="${{ inputs.package_version }}"
+          JSON_URL="https://pypi.org/pypi/${PACKAGE_NAME}/json"
+          echo "正在从 ${JSON_URL} 获取信息..."
+          SDIST_URL=$(curl -sL ${JSON_URL} | jq -r --arg VERSION "${PACKAGE_VERSION}" '.releases[$VERSION][] | select(.packagetype == "sdist") | .url')
+          if [ -z "${SDIST_URL}" ]; then
+            echo "::error::无法为 ${PACKAGE_NAME} 版本 ${PACKAGE_VERSION} 找到 sdist (tar.gz) 源码包。"
+            exit 1
+          fi
+          FILENAME=$(basename "${SDIST_URL}")
+          SOURCE_DIR="${FILENAME%.tar.gz}"
+          echo "sdist_url=${SDIST_URL}" >> $GITHUB_OUTPUT
+          echo "source_dir=${SOURCE_DIR}" >> $GITHUB_OUTPUT
+          echo "成功获取到源码包 URL: ${SDIST_URL}"
+          echo "源码目录名: ${SOURCE_DIR}"
+
+  # 任务2：构建 wheel 文件
+  build_wheels:
+    # 任务名称
+    name: ${{ matrix.target }}
+    # 依赖于前两个准备任务的成功
+    needs: [get_source_info, prepare_matrix]
+    # 运行环境，根据矩阵中的目标平台动态选择
+    runs-on: ${{ startsWith(matrix.target, 'windows') && 'windows-latest' || startsWith(matrix.target, 'macos') && 'macos-latest' || 'ubuntu-latest' }}
+    # 构建矩阵策略
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.prepare_matrix.outputs.matrix) }}
+
+    steps:
+      # 步骤1：检出代码库
+      - name: 检出代码
+        uses: actions/checkout@v5
+
+      # 步骤2：下载并解压源码包
+      - name: 下载并解压源码包
+        shell: bash
+        run: |
+          SDIST_URL="${{ needs.get_source_info.outputs.sdist_url }}"
+          echo "正在下载源码: ${SDIST_URL}"
+          curl -sL -o source.tar.gz "${SDIST_URL}"
+          tar -xzf source.tar.gz
+          echo "解压完成。"
+
+      # 步骤3：准备 cibuildwheel 所需的环境变量
+      - name: 准备构建变量
+        id: vars
+        shell: bash
+        run: |
+          PY_VERSION_SHORT=$(echo "${{ inputs.python_version }}" | cut -d. -f1,2 | tr -d .)
+          echo "cibw_build_version=cp${PY_VERSION_SHORT}-*" >> $GITHUB_OUTPUT
+          ARCH=$(echo "${{ matrix.target }}" | cut -d- -f2-)
+          if [[ "${{ runner.os }}" == "Windows" && "${ARCH}" == "amd64" ]]; then
+            ARCH="AMD64"
+          fi
+          echo "cibw_arch=${ARCH}" >> $GITHUB_OUTPUT
+
+      # 步骤4：为 Linux 平台设置 QEMU
+      - name: (仅Linux) 设置 QEMU
+        if: runner.os == 'Linux'
+        uses: docker/setup-qemu-action@v3
+
+      # 步骤5：使用 cibuildwheel 构建 wheel 文件
+      - name: 构建 Wheel
+        uses: pypa/cibuildwheel@v3.1.4
+        env:
+          CIBW_BUILD: ${{ steps.vars.outputs.cibw_build_version }}
+          CIBW_OUTPUT_DIR: wheels
+          CIBW_SKIP: "*-win32 *-manylinux_armv7l *-manylinux_ppc64le *-manylinux_s390x"
+          CIBW_ARCHS: ${{ steps.vars.outputs.cibw_arch }}
+        with:
+          package-dir: ${{ needs.get_source_info.outputs.source_dir }}
+
+      # 步骤6：将构建好的 wheel 文件作为产物上传
+      - name: 上传构建产物
+        uses: actions/upload-artifact@v4
+        with:
+          name: wheel-${{ matrix.target }}
+          path: ./wheelhouse/*.whl
+
+  # 任务3：提交 wheel 文件到仓库
+  commit_wheels:
+    # 任务名称
+    name: 提交 Wheels 到仓库
+    # 依赖于 build_wheels 任务的完全成功
+    needs: build_wheels
+    # 运行环境
+    runs-on: ubuntu-latest
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v5
+
+      - name: 确定最终提交目录
+        id: set_path
+        shell: bash
+        run: |
+          if "${{ inputs.commit_directory }}" == ""; then
+            FINAL_PATH="wheels/${{ inputs.package_name }}/${{ inputs.package_version }} }}"
+          else
+            FINAL_PATH="${{ inputs.commit_directory }}"
+          fi
+          echo "最终提交目录: ${FINAL_PATH}"
+          # 将最终路径设置为本步骤的输出，供后续步骤使用
+          echo "path=${FINAL_PATH}" >> $GITHUB_OUTPUT
+
+      - name: 创建目标目录
+        run: |
+          mkdir -p ${{ steps.set_path.outputs.path }}
+
+      - name: 下载所有 Wheels 产物
+        uses: actions/download-artifact@v5
+        with:
+          path: temp-wheels
+
+      - name: 整理 Wheel 文件
+        run: |
+          # 使用上一步计算出的最终路径
+          find temp-wheels -name "*.whl" -exec mv {} ${{ steps.set_path.outputs.path }}/ \;
+          echo "所有 wheel 文件已整理到目标目录:"
+          ls -R ${{ steps.set_path.outputs.path }}
+
+      - name: 提交并推送文件
+        run: |
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+          # 使用上一步计算出的最终路径
+          git add ${{ steps.set_path.outputs.path }}/*.whl
+          if git diff --staged --quiet; then
+            echo "没有新的 wheel 文件需要提交。"
+          else
+            git commit -m "build: 为 ${{ inputs.package_name }} ${{ inputs.package_version }} 添加 wheels"
+            git push
+            echo "新的 wheel 文件已成功提交并推送。"
+          fi

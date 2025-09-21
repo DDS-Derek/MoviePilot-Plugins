@@ -5,7 +5,7 @@ from typing import Dict, Any, Tuple, Optional, List
 from app.schemas.message import ChannelCapabilityManager
 
 from ..helper.tg_search import TgSearcher
-from ..sdk.nullbr import NullbrHelper
+from ..helper.nullbr import NullbrHelper
 from .framework.callbacks import Action
 from .framework.registry import view_registry
 from .framework.views import BaseViewRenderer

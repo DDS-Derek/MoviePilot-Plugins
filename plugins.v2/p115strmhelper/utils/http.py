@@ -1,16 +1,15 @@
-import requests
-from requests.exceptions import HTTPError
-
+import httpx
 
 def check_response(
-    resp: requests.Response,
-) -> requests.Response:
+    resp: httpx.Response,
+) -> httpx.Response:
     """
-    检查 HTTP 响应，如果状态码 ≥ 400 则抛出 HTTPError
+    检查 HTTP 响应，如果状态码 ≥ 400 则抛出 httpx.HTTPStatusError
     """
     if resp.status_code >= 400:
-        raise HTTPError(
-            f"HTTP Error {resp.status_code}: {resp.text}",
+        raise httpx.HTTPStatusError(
+            f"HTTP Error {resp.status_code}: {resp.reason_phrase}",
+            request=resp.request,
             response=resp,
         )
     return resp

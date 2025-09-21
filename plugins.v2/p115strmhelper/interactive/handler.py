@@ -1,6 +1,6 @@
 from typing import List, Dict
 
-import requests
+import httpx
 
 from app.log import logger
 from app.core.config import settings
@@ -127,7 +127,7 @@ class ActionHandler(BaseActionHandler):
                 raise ValueError("当前没有可用的资源。")
             if 0 <= item_index < len(search_data):
                 data = search_data[item_index]
-                resp = requests.get(
+                resp = httpx.get(
                     f"{configer.get_config('moviepilot_address').rstrip('/')}/api/v1/plugin/P115StrmHelper/add_transfer_share?apikey={settings.API_TOKEN}&share_url={data.get('shareurl')}"
                 )
                 if resp.json().get("code") == 0:

@@ -7,7 +7,7 @@ from time import sleep, time, perf_counter
 from typing import Optional, Union
 
 import oss2
-import requests
+import httpx
 from sqlalchemy.orm.exc import MultipleResultsFound
 from oss2 import SizedFileAdapter, determine_part_size
 from oss2.models import PartInfo
@@ -51,7 +51,7 @@ class U115OpenHelper:
 
     def __init__(self):
         super().__init__()
-        self.session = requests.Session()
+        self.session = httpx.Client(follow_redirects=True, timeout=20.0)
         self._init_session()
 
         self.fail_upload_count = 0
@@ -103,6 +103,8 @@ class U115OpenHelper:
                             storage="u115",
                             conf={"refresh_time": int(time()), **tokens},
                         )
+                    else:
+                        return None
                 access_token = tokens.get("access_token")
                 if access_token:
                     self.session.headers.update(
@@ -111,6 +113,7 @@ class U115OpenHelper:
                 return access_token
             except Exception as e:
                 logger.error(f"【P115Open】获取访问 Token 出现未知错误: {e}")
+                return None
 
     def __refresh_access_token(self, refresh_token: str) -> Optional[dict]:
         """
@@ -138,7 +141,6 @@ class U115OpenHelper:
         method: str,
         endpoint: str,
         result_key: Optional[str] = None,
-        headers: Optional[dict] = None,
         **kwargs,
     ) -> Optional[Union[dict, list]]:
         """
@@ -147,20 +149,30 @@ class U115OpenHelper:
         # 检查会话
         self._check_session()
 
-        request_headers = copy(self.session.headers)
-        if headers:
-            request_headers.update(headers)
-        kwargs["headers"] = request_headers
+        # 错误日志标志
+        no_error_log = kwargs.pop("no_error_log", False)
+        # 重试次数
+        retry_times = kwargs.pop("retry_limit", 5)
 
-        resp = self.session.request(method, f"{self.base_url}{endpoint}", **kwargs)
+        try:
+            resp = self.session.request(method, f"{self.base_url}{endpoint}", **kwargs)
+        except httpx.RequestError as e:
+            logger.error(f"【P115Open】{method} 请求 {endpoint} 网络错误: {str(e)}")
+            return None
+
         if resp is None:
             logger.warn(f"【P115Open】{method} 请求 {endpoint} 失败！")
             return None
 
+        kwargs["retry_limit"] = retry_times
+
         # 处理速率限制
         if resp.status_code == 429:
-            reset_time = int(resp.headers.get("X-RateLimit-Reset", 60))
-            sleep(reset_time + 5)
+            reset_time = 5 + int(resp.headers.get("X-RateLimit-Reset", 60))
+            logger.debug(
+                f"【P115Open】{method} 请求 {endpoint} 限流，等待{reset_time}秒后重试"
+            )
+            sleep(reset_time)
             return self._request_api(method, endpoint, result_key, **kwargs)
 
         # 处理请求错误
@@ -170,8 +182,8 @@ class U115OpenHelper:
         ret_data = resp.json()
         if ret_data.get("code") != 0:
             error_msg = ret_data.get("message")
-            logger.warn(f"【P115Open】{method} 请求 {endpoint} 出错：{error_msg}！")
-            retry_times = kwargs.get("retry_limit", 5)
+            if not no_error_log:
+                logger.warn(f"【P115Open】{method} 请求 {endpoint} 出错：{error_msg}")
             if "已达到当前访问上限" in error_msg:
                 if retry_times <= 0:
                     logger.error(
@@ -330,7 +342,7 @@ class U115OpenHelper:
             """
             发送上传等待
             """
-            if configer.notify:
+            if configer.notify and configer.upload_module_notify:
                 post_message(
                     mtype=NotificationType.Plugin,
                     title="【115网盘】上传模块增强",
@@ -370,7 +382,9 @@ class U115OpenHelper:
                 "fileid": file_sha1,
                 "preid": file_preid,
             }
-            init_resp = self._request_api("POST", "/open/upload/init", data=init_data)
+            init_resp = self._request_api(
+                "POST", "/open/upload/init", data=init_data, timeout=120.0
+            )
             if not init_resp:
                 return None
             if not init_resp.get("state"):
@@ -410,7 +424,7 @@ class U115OpenHelper:
                     {"pick_code": pick_code, "sign_key": sign_key, "sign_val": sign_val}
                 )
                 init_resp = self._request_api(
-                    "POST", "/open/upload/init", data=init_data
+                    "POST", "/open/upload/init", data=init_data, timeout=120.0
                 )
                 if not init_resp:
                     return None
@@ -456,6 +470,7 @@ class U115OpenHelper:
                         "/open/folder/get_info",
                         "data",
                         params={"file_id": int(file_id)},
+                        timeout=120.0,
                     )
                     if info_resp:
                         try:
@@ -483,7 +498,7 @@ class U115OpenHelper:
                         except Exception as e:
                             logger.error(f"【P115Open】处理返回信息失败: {e}")
                             return None
-                return self._delay_get_item(target_path)
+                return U115OpenHelper._delay_get_item(target_path)
 
             # 判断是等待秒传还是直接上传
             upload_module_skip_upload_wait_size = int(
@@ -498,7 +513,7 @@ class U115OpenHelper:
                 )
                 break
 
-            if wait_start_time - perf_counter() > int(
+            if perf_counter() - wait_start_time > int(
                 configer.get_config("upload_module_wait_timeout")
             ):
                 logger.warn(
@@ -567,7 +582,9 @@ class U115OpenHelper:
 
         # Step 4: 获取上传凭证
         second_auth = False
-        token_resp = self._request_api("GET", "/open/upload/get_token", "data")
+        token_resp = self._request_api(
+            "GET", "/open/upload/get_token", "data", timeout=120.0
+        )
         if not token_resp:
             logger.warn("【P115Open】获取上传凭证失败")
             return None
@@ -589,6 +606,7 @@ class U115OpenHelper:
                 "fileid": file_sha1,
                 "pick_code": pick_code,
             },
+            timeout=120.0,
         )
         if resume_resp:
             logger.debug(f"【P115Open】上传 Step 5 断点续传结果: {resume_resp}")
@@ -668,7 +686,10 @@ class U115OpenHelper:
                                 )
                                 # Step 4: 重新获取上传凭证
                                 token_resp = self._request_api(
-                                    "GET", "/open/upload/get_token", "data"
+                                    "GET",
+                                    "/open/upload/get_token",
+                                    "data",
+                                    timeout=120.0,
                                 )
                                 if not token_resp:
                                     logger.error(
@@ -777,7 +798,7 @@ class U115OpenHelper:
             int(elapsed_time),
         )
         # 返回结果
-        return self._delay_get_item(target_path)
+        return U115OpenHelper._delay_get_item(target_path)
 
     def create_folder(
         self, parent_item: schemas.FileItem, name: str
@@ -845,7 +866,11 @@ class U115OpenHelper:
         """
         try:
             resp = self._request_api(
-                "POST", "/open/folder/get_info", "data", data={"path": path.as_posix()}
+                "POST",
+                "/open/folder/get_info",
+                "data",
+                data={"path": path.as_posix()},
+                no_error_log=True,
             )
             if not resp:
                 return None

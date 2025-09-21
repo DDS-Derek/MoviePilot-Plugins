@@ -5,7 +5,7 @@ from typing import List, Optional
 from urllib.parse import urlparse
 from pathlib import Path
 
-import requests
+import httpx
 from p115client import P115Client
 
 from app.log import logger
@@ -40,10 +40,10 @@ class Ali2115Helper:
         """
         end = start + length - 1
         headers = {"Range": f"bytes={start}-{end}"}
-        with requests.get(url, headers=headers, stream=True) as r:
+        with httpx.stream("GET", url, headers=headers, follow_redirects=True) as r:
             r.raise_for_status()
             _sha1 = sha1()
-            for chunk in r.iter_content(chunk_size=8192):
+            for chunk in r.iter_bytes(chunk_size=8192):
                 _sha1.update(chunk)
             return _sha1.hexdigest().upper()
 

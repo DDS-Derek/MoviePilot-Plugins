@@ -1,11 +1,12 @@
 import re
 from typing import List
 
-import requests
+import httpx
 from bs4 import BeautifulSoup
 
 from app.log import logger
 from app.core.config import settings
+from app.utils.http import AsyncRequestUtils
 
 from ..core.config import configer
 from ..schemas.tg_search import ResourceItem
@@ -26,10 +27,16 @@ class TgSearcher:
     """
 
     def __init__(self):
-        self.session = requests.Session()
-        self.session.headers.update({"User-Agent": configer.get_user_agent(utype=1)})
-        if settings.PROXY:
-            self.session.proxies.update(settings.PROXY)
+        proxies = (
+            AsyncRequestUtils._convert_proxies_for_httpx(settings.PROXY)
+            if settings.PROXY
+            else None
+        )
+        self.session = httpx.Client(
+            headers={"User-Agent": configer.get_user_agent(utype=1)},
+            proxy=proxies,
+            follow_redirects=True,
+        )
 
     @staticmethod
     def extract_cloud_links(text: str) -> tuple[List[str], str]:
@@ -66,7 +73,7 @@ class TgSearcher:
             response = self.session.get(url, timeout=60)
             response.raise_for_status()
             html = response.text
-        except requests.exceptions.RequestException as e:
+        except httpx.RequestError as e:
             logger.warn(f"【TGSearch】请求失败: {url}, 错误: {e}")
             return []
 

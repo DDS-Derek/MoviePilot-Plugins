@@ -1,5 +1,9 @@
 from pathlib import Path
 from typing import Tuple, Optional
+from shutil import rmtree
+
+from app.log import logger
+from app.utils.system import SystemUtils
 
 
 class PathUtils:
@@ -77,3 +81,41 @@ class PathUtils:
                 final_paths = f"{local_path}#{media_path}"
                 return True, final_paths
         return False, None
+
+class PathRemoveUtils:
+    """
+    目录删除工具
+    """
+
+    @staticmethod
+    def remove_parent_dir(file_path: Path, mode: str | list = "all", func_type: str = None):
+        """
+        删除父目录
+
+        :param file_path: 文件夹路径
+        :param mode: 删除模式，支持全部匹配和文件后缀匹配
+        :param func_type: 日志输出函数名称
+        """
+        # 删除空目录
+        # 判断当前媒体父路径下是否有媒体文件，如有则无需遍历父级
+        if mode == "all":
+            func_bool = any(file_path.parent.iterdir())
+        else:
+            func_bool = SystemUtils.exits_files(directory=file_path.parent, extensions=mode)
+        if not func_bool:
+            # 判断父目录是否为空, 为空则删除
+            i = 0
+            for parent_path in file_path.parents:
+                i += 1
+                if i > 3:
+                    break
+                if str(parent_path.parent) != str(file_path.root):
+                    # 父目录非根目录，才删除父目录
+                    if mode == "all":
+                        func_bool = any(parent_path.iterdir())
+                    else:
+                        func_bool = SystemUtils.exits_files(directory=parent_path, extensions=mode)
+                    if not func_bool:
+                        # 当前路径下没有媒体文件则删除
+                        rmtree(parent_path)
+                        logger.warn(f"{func_type}本地空目录 {parent_path} 已删除")
