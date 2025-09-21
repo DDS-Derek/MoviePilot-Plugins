@@ -849,67 +849,57 @@ class Api:
         return OOPServerHelper.check_feature(name)
 
     @staticmethod
-    def get_webdav_status_api() -> Dict:
+    def get_webdav_status_api() -> ApiResponse[dict]:
         """
         获取WebDAV服务状态
         """
         status = webdav_service.get_status()
-        return {
-            "code": 0,
-            "msg": "获取WebDAV状态成功",
-            "data": status
-        }
+        return ApiResponse(data=status, msg="获取WebDAV状态成功")
 
     @staticmethod
-    def start_webdav_service_api() -> Dict:
+    def start_webdav_service_api() -> ApiResponse[dict]:
         """
         启动WebDAV服务
         """
         if webdav_service.start():
-            return {
-                "code": 0,
-                "msg": "WebDAV服务启动成功",
-                "data": webdav_service.get_status()
-            }
+            return ApiResponse(
+                data=webdav_service.get_status(),
+                msg="WebDAV服务启动成功"
+            )
         else:
-            return {
-                "code": -1,
-                "msg": "WebDAV服务启动失败",
-                "data": None
-            }
+            return ApiResponse(
+                code=-1,
+                msg="WebDAV服务启动失败"
+            )
 
     @staticmethod
-    def stop_webdav_service_api() -> Dict:
+    def stop_webdav_service_api() -> ApiResponse[dict]:
         """
         停止WebDAV服务
         """
         if webdav_service.stop():
-            return {
-                "code": 0,
-                "msg": "WebDAV服务停止成功",
-                "data": webdav_service.get_status()
-            }
+            return ApiResponse(
+                data=webdav_service.get_status(),
+                msg="WebDAV服务停止成功"
+            )
         else:
-            return {
-                "code": -1,
-                "msg": "WebDAV服务停止失败",
-                "data": None
-            }
+            return ApiResponse(
+                code=-1,
+                msg="WebDAV服务停止失败"
+            )
 
     @staticmethod
-    def restart_webdav_service_api() -> Dict:
+    def restart_webdav_service_api() -> ApiResponse[dict]:
         """
         重启WebDAV服务
         """
         if webdav_service.restart():
-            return {
-                "code": 0,
-                "msg": "WebDAV服务重启成功",
-                "data": webdav_service.get_status()
-            }
+            return ApiResponse(
+                data=webdav_service.get_status(),
+                msg="WebDAV服务重启成功"
+            )
         else:
-            return {
-                "code": -1,
-                "msg": "WebDAV服务重启失败",
-                "data": None
-            }
+            return ApiResponse(
+                code=-1,
+                msg="WebDAV服务重启失败"
+            )
