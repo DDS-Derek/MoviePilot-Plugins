@@ -191,6 +191,7 @@ class WebDAVFileResource(WebDAVResourceBase, DAVNonCollection):
             f"?apikey={settings.API_TOKEN}&pickcode={self.attr['pickcode']}&file_name={name}"
         )
 
+    # TODO 待重构
     def get_content(self):
         """
         获取文件内容
@@ -291,7 +292,7 @@ class WebDAVFileResource(WebDAVResourceBase, DAVNonCollection):
 
     def end_write(self, *, with_errors):
         """
-        结束写入 (简化版本)
+        结束写入
         """
         if not with_errors and self.local_path:
             try:
