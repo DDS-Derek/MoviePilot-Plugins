@@ -6,7 +6,4 @@ sentry-sdk~=2.38.0
 aligo~=6.2.6
 qrcode_terminal~=0.8
 pyahocorasick~=2.2.0
-WsgiDAV~=4.3.3
-waitress~=3.0.2
-property
 httpx[http2]
