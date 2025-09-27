@@ -151,6 +151,9 @@
               <v-tab value="tab-same-playback" class="text-caption">
                 <v-icon size="small" start>mdi:code-block-parentheses</v-icon>多端播放
               </v-tab>
+              <v-tab value="tab-cache-config" class="text-caption">
+                <v-icon size="small" start>mdi-cached</v-icon>缓存配置
+              </v-tab>
               <v-tab value="tab-data-enhancement" class="text-caption">
                 <v-icon size="small" start>mdi-database-eye-outline</v-icon>数据增强
               </v-tab>
@@ -290,6 +293,24 @@
                           color="warning"></v-switch>
                       </v-col>
                       <v-col cols="12" md="3">
+                        <v-switch v-model="config.full_sync_remove_unless_dir" label="清理无效STRM目录"
+                          color="warning" :disabled="!config.full_sync_remove_unless_strm"></v-switch>
+                      </v-col>
+                      <v-col cols="12" md="3">
+                        <v-switch v-model="config.full_sync_remove_unless_file" label="清理无效STRM文件关联的媒体信息文件"
+                          color="warning" :disabled="!config.full_sync_remove_unless_strm"></v-switch>
+                      </v-col>
+                    </v-row>
+
+                    <v-row>
+                      <v-col cols="12" md="3">
+                        <v-switch v-model="config.timing_full_sync_strm" label="定期全量同步" color="info"></v-switch>
+                      </v-col>
+                      <v-col cols="12" md="3">
+                        <VCronField v-model="config.cron_full_sync_strm" label="运行全量同步周期" hint="设置全量同步的执行周期"
+                          persistent-hint density="compact"></VCronField>
+                      </v-col>
+                      <v-col cols="12" md="3">
                         <v-switch v-model="config.full_sync_auto_download_mediainfo_enabled" label="下载媒体数据文件"
                           color="warning"></v-switch>
                       </v-col>
@@ -297,16 +318,6 @@
                         <v-text-field v-model="fullSyncMinFileSizeFormatted" label="STRM最小文件大小"
                           hint="小于此值的文件将不生成STRM(单位K,M,G)" persistent-hint density="compact" placeholder="例如: 100M (可为空)"
                           clearable></v-text-field>
-                      </v-col>
-                    </v-row>
-
-                    <v-row>
-                      <v-col cols="12" md="6">
-                        <v-switch v-model="config.timing_full_sync_strm" label="定期全量同步" color="info"></v-switch>
-                      </v-col>
-                      <v-col cols="12" md="6">
-                        <VCronField v-model="config.cron_full_sync_strm" label="运行全量同步周期" hint="设置全量同步的执行周期"
-                          persistent-hint density="compact"></VCronField>
                       </v-col>
                     </v-row>
 
@@ -1092,6 +1103,82 @@
                     </v-col>
                   </v-row>
 
+                  <v-row class="mt-4">
+                    <v-col cols="12" md="4">
+                      <v-switch v-model="config.strm_url_encode" label="STRM URL 文件名称编码" color="info" density="compact"
+                        hint="启用后，STRM文件中的URL会对文件名进行编码处理"></v-switch>
+                    </v-col>
+                  </v-row>
+
+                </v-card-text>
+              </v-window-item>
+
+              <!-- 缓存配置 -->
+              <v-window-item value="tab-cache-config">
+                <v-card-text>
+                  <v-row>
+                    <v-col cols="12">
+                      <v-card variant="outlined" class="mb-4">
+                        <v-card-item>
+                          <v-card-title class="d-flex align-center">
+                            <v-icon start>mdi-cached</v-icon>
+                            <span class="text-h6">缓存管理</span>
+                          </v-card-title>
+                        </v-card-item>
+                        <v-card-text>
+                          <v-alert type="info" variant="tonal" density="compact" class="mb-4">
+                            缓存清理功能可以帮助您清理插件运行过程中产生的缓存数据，解决部分因缓存导致的问题。
+                          </v-alert>
+                          
+                          <v-row>
+                            <v-col cols="12" md="6">
+                              <v-card variant="outlined" class="pa-4 d-flex flex-column cache-card">
+                                <div class="d-flex align-center mb-3">
+                                  <v-icon color="primary" class="mr-2">mdi-folder-cog</v-icon>
+                                  <span class="text-subtitle-1 font-weight-medium">清理文件路径ID缓存</span>
+                                </div>
+                                <p class="text-body-2 text-grey-darken-1 mb-3 flex-grow-1">
+                                  清理文件路径ID缓存，包括目录ID到路径的映射缓存。
+                                </p>
+                                <v-btn 
+                                  color="primary" 
+                                  variant="outlined" 
+                                  :loading="clearIdPathCacheLoading"
+                                  @click="clearIdPathCache"
+                                  prepend-icon="mdi-folder-cog"
+                                  block
+                                >
+                                  清理文件路径ID缓存
+                                </v-btn>
+                              </v-card>
+                            </v-col>
+                            
+                            <v-col cols="12" md="6">
+                              <v-card variant="outlined" class="pa-4 d-flex flex-column cache-card">
+                                <div class="d-flex align-center mb-3">
+                                  <v-icon color="warning" class="mr-2">mdi-skip-next</v-icon>
+                                  <span class="text-subtitle-1 font-weight-medium">清理增量同步跳过路径缓存</span>
+                                </div>
+                                <p class="text-body-2 text-grey-darken-1 mb-3 flex-grow-1">
+                                  清理增量同步跳过路径缓存，重置增量同步的跳过路径记录，用于重新处理之前跳过的文件。
+                                </p>
+                                <v-btn 
+                                  color="warning" 
+                                  variant="outlined" 
+                                  :loading="clearIncrementSkipCacheLoading"
+                                  @click="clearIncrementSkipCache"
+                                  prepend-icon="mdi-skip-next"
+                                  block
+                                >
+                                  清理增量同步跳过路径缓存
+                                </v-btn>
+                              </v-card>
+                            </v-col>
+                          </v-row>
+                        </v-card-text>
+                      </v-card>
+                    </v-col>
+                  </v-row>
                 </v-card-text>
               </v-window-item>
 
@@ -1362,6 +1449,8 @@ const loading = ref(true);
 const saveLoading = ref(false);
 const syncLoading = ref(false);
 const shareSyncLoading = ref(false);
+const clearIdPathCacheLoading = ref(false);
+const clearIncrementSkipCacheLoading = ref(false);
 const activeTab = ref('tab-transfer');
 const mediaservers = ref([]);
 const isCookieVisible = ref(false);
@@ -1389,6 +1478,8 @@ const config = reactive({
   timing_full_sync_strm: false,
   full_sync_overwrite_mode: "never",
   full_sync_remove_unless_strm: false,
+  full_sync_remove_unless_dir: false,
+  full_sync_remove_unless_file: false,
   full_sync_auto_download_mediainfo_enabled: false,
   full_sync_strm_log: true,
   full_sync_batch_num: 5000,
@@ -1454,7 +1545,8 @@ const config = reactive({
   strm_url_mode_custom: '',
   strm_generate_blacklist: [],
   mediainfo_download_whitelist: [],
-  mediainfo_download_blacklist: []
+  mediainfo_download_blacklist: [],
+  strm_url_encode: false
 });
 
 // 消息提示
@@ -1882,6 +1974,15 @@ watch(monitorLifeExcludePaths, (newVal) => {
   }
 }, { deep: true });
 
+// 监听 full_sync_remove_unless_strm 变化，当禁用时自动禁用依赖的配置项
+watch(() => config.full_sync_remove_unless_strm, (newVal) => {
+  if (!newVal) {
+    // 当主配置被禁用时，自动禁用依赖的配置项
+    config.full_sync_remove_unless_dir = false;
+    config.full_sync_remove_unless_file = false;
+  }
+});
+
 const generatePathsConfig = (paths, key) => {
   const configText = paths.map(p => {
     if (key === 'panTransfer') {
@@ -2083,6 +2184,58 @@ const triggerShareSync = async () => {
     console.error('启动分享同步失败:', err);
   } finally {
     shareSyncLoading.value = false;
+  }
+};
+
+// 清理文件路径ID缓存
+const clearIdPathCache = async () => {
+  clearIdPathCacheLoading.value = true;
+  message.text = '';
+  try {
+    const result = await props.api.post(`plugin/${PLUGIN_ID}/clear_id_path_cache`);
+    if (result && result.code === 0) {
+      message.text = result.msg || '文件路径ID缓存清理成功';
+      message.type = 'success';
+    } else {
+      throw new Error(result?.msg || '文件路径ID缓存清理失败');
+    }
+  } catch (err) {
+    message.text = `文件路径ID缓存清理失败: ${err.message || '未知错误'}`;
+    message.type = 'error';
+    console.error('文件路径ID缓存清理失败:', err);
+  } finally {
+    clearIdPathCacheLoading.value = false;
+    setTimeout(() => {
+      if (message.type === 'success' || message.type === 'error') {
+        message.text = '';
+      }
+    }, 3000);
+  }
+};
+
+// 清理增量同步跳过路径缓存
+const clearIncrementSkipCache = async () => {
+  clearIncrementSkipCacheLoading.value = true;
+  message.text = '';
+  try {
+    const result = await props.api.post(`plugin/${PLUGIN_ID}/clear_increment_skip_cache`);
+    if (result && result.code === 0) {
+      message.text = result.msg || '增量同步跳过路径缓存清理成功';
+      message.type = 'success';
+    } else {
+      throw new Error(result?.msg || '增量同步跳过路径缓存清理失败');
+    }
+  } catch (err) {
+    message.text = `增量同步跳过路径缓存清理失败: ${err.message || '未知错误'}`;
+    message.type = 'error';
+    console.error('增量同步跳过路径缓存清理失败:', err);
+  } finally {
+    clearIncrementSkipCacheLoading.value = false;
+    setTimeout(() => {
+      if (message.type === 'success' || message.type === 'error') {
+        message.text = '';
+      }
+    }, 3000);
   }
 };
 
@@ -2795,5 +2948,25 @@ const removeExcludePathEntry = (index, type) => {
 :deep(v-switch[color="error"] .v-selection-control--dirty .v-switch__track) {
   background-color: rgb(var(--v-theme-error)) !important;
   border-color: rgb(var(--v-theme-error)) !important;
+}
+
+/* 缓存卡片响应式样式 */
+.cache-card {
+  min-height: 200px;
+}
+
+/* 移动端优化 */
+@media (max-width: 959px) {
+  .cache-card {
+    min-height: auto;
+    height: auto;
+  }
+}
+
+/* 桌面端保持固定高度 */
+@media (min-width: 960px) {
+  .cache-card {
+    height: 200px;
+  }
 }
 </style>

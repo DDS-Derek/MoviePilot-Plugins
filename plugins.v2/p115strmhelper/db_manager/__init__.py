@@ -1,5 +1,7 @@
 from pathlib import Path
+from time import sleep
 from typing import Any, Generator, List, Optional, Self, Tuple
+from sqlite3 import OperationalError as SqlOperationalError, SQLITE_BUSY
 
 from sqlalchemy import (
     create_engine,
@@ -16,8 +18,9 @@ from sqlalchemy.orm import (
     sessionmaker,
     scoped_session,
     DeclarativeBase,
-    Session
+    Session,
 )
+from sqlalchemy.exc import OperationalError
 
 from ..core.config import configer
 from app.core.config import settings
@@ -55,6 +58,13 @@ class __DBManager:
                 # 将超时时间（秒）转换为毫秒
                 busy_timeout_ms = int(settings.DB_TIMEOUT * 1000)
                 cursor.execute(f"PRAGMA busy_timeout = {busy_timeout_ms};")
+
+            # 设置其他性能优化参数
+            cursor.execute("PRAGMA synchronous = NORMAL;")
+            cursor.execute("PRAGMA cache_size = -100000;")
+            cursor.execute("PRAGMA temp_store = MEMORY;")
+            # 设置合理的锁定模式，避免独占锁定
+            cursor.execute("PRAGMA locking_mode = NORMAL;")
         finally:
             cursor.close()
 
@@ -212,6 +222,39 @@ def update_args_db(args: tuple, kwargs: dict, db: Session) -> Tuple[tuple, dict]
     return args, kwargs
 
 
+def init_database() -> bool:
+    """
+    初始化数据库操作
+    """
+    # 自动初始化数据库管理器
+    if not ct_db_manager.is_initialized():
+        logger.info("数据库管理器未初始化，正在自动初始化...")
+
+        # 延迟导入避免循环导入
+        from .init import init_db, migration_db, init_migration_scripts
+
+        # 初始化数据库
+        ct_db_manager.init_database(db_path=configer.PLUGIN_DB_PATH)
+
+        # 初始化数据库表
+        init_db(engine=ct_db_manager.Engine)
+
+        # 运行迁移脚本
+        if init_migration_scripts():
+            migration_db(
+                db_path=configer.PLUGIN_DB_PATH,
+                script_location=configer.PLUGIN_DATABASE_SCRIPT_LOCATION,
+                version_locations=configer.PLUGIN_DATABASE_VERSION_LOCATIONS,
+            )
+
+    # 检查 ScopedSession 是否可用
+    if ct_db_manager.ScopedSession is None:
+        logger.error("数据库会话工厂初始化失败")
+        raise RuntimeError("数据库会话工厂初始化失败")
+
+    return True
+
+
 def db_update(func):
     """
     数据库更新类操作装饰器，第一个参数必须是数据库会话或存在db参数
@@ -220,29 +263,53 @@ def db_update(func):
     def wrapper(*args, **kwargs):
         # 是否关闭数据库会话
         _close_db = False
-        # 从参数中获取数据库会话
         db = get_args_db(args, kwargs)
         if not db:
+            init_database()
             # 如果没有获取到数据库会话，创建一个
             db = ct_db_manager.ScopedSession()
             # 标记需要关闭数据库会话
             _close_db = True
             # 更新参数中的数据库会话
             args, kwargs = update_args_db(args, kwargs, db)
+
+        max_retries = 3
+        retry_delay = 0.1
+        last_err = None
+
         try:
-            # 执行函数
-            result = func(*args, **kwargs)
-            # 提交事务
-            db.commit()
+            for attempt in range(max_retries):
+                try:
+                    # 执行函数
+                    result = func(*args, **kwargs)
+                    # 提交事务
+                    db.commit()
+                    return result
+                except OperationalError as err:
+                    # 回滚事务
+                    db.rollback()
+                    last_err = err
+                    if not (
+                        isinstance(err.orig, SqlOperationalError)
+                        and err.orig.sqlite_errorcode == SQLITE_BUSY
+                    ):
+                        raise err
+
+                    logger.warning(
+                        f"数据库锁定，第 {attempt + 1} 次重试，等待 {retry_delay}s..."
+                    )
+                    sleep(retry_delay)
+                    retry_delay *= 2
+            if last_err:
+                raise last_err
         except Exception as err:
-            # 回滚事务
-            db.rollback()
+            if not isinstance(err, OperationalError):
+                db.rollback()
             raise err
         finally:
             # 关闭数据库会话
             if _close_db:
                 db.close()
-        return result
 
     return wrapper
 
@@ -259,6 +326,7 @@ def db_query(func):
         # 从参数中获取数据库会话
         db = get_args_db(args, kwargs)
         if not db:
+            init_database()
             # 如果没有获取到数据库会话，创建一个
             db = ct_db_manager.ScopedSession()
             # 标记需要关闭数据库会话

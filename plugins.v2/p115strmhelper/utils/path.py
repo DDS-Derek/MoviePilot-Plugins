@@ -82,13 +82,16 @@ class PathUtils:
                 return True, final_paths
         return False, None
 
+
 class PathRemoveUtils:
     """
     目录删除工具
     """
 
     @staticmethod
-    def remove_parent_dir(file_path: Path, mode: str | list = "all", func_type: str = None):
+    def remove_parent_dir(
+        file_path: Path, mode: str | list = "all", func_type: str = None
+    ):
         """
         删除父目录
 
@@ -101,7 +104,9 @@ class PathRemoveUtils:
         if mode == "all":
             func_bool = any(file_path.parent.iterdir())
         else:
-            func_bool = SystemUtils.exits_files(directory=file_path.parent, extensions=mode)
+            func_bool = SystemUtils.exits_files(
+                directory=file_path.parent, extensions=mode
+            )
         if not func_bool:
             # 判断父目录是否为空, 为空则删除
             i = 0
@@ -114,8 +119,29 @@ class PathRemoveUtils:
                     if mode == "all":
                         func_bool = any(parent_path.iterdir())
                     else:
-                        func_bool = SystemUtils.exits_files(directory=parent_path, extensions=mode)
+                        func_bool = SystemUtils.exits_files(
+                            directory=parent_path, extensions=mode
+                        )
                     if not func_bool:
                         # 当前路径下没有媒体文件则删除
                         rmtree(parent_path)
                         logger.warn(f"{func_type}本地空目录 {parent_path} 已删除")
+
+    @staticmethod
+    def clean_related_files(file_path: Path, func_type: str = None):
+        """
+        根据一个文件的路径，清理同一文件夹下文件名包含此文件名的其他文件。
+
+        :param file_path: 基准文件路径
+        :param func_type: 日志输出函数名称
+        """
+        directory = file_path.parent
+        file_stem = file_path.stem
+        for item_to_check in directory.iterdir():
+            if (
+                item_to_check.is_file()
+                and item_to_check != file_path
+                and file_stem in item_to_check.stem
+            ):
+                logger.warn(f"{func_type}删除文件 {item_to_check}")
+                item_to_check.unlink(missing_ok=True)

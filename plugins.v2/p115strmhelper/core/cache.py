@@ -1,9 +1,23 @@
-from typing import List, Dict, MutableMapping, Optional
+__all__ = [
+    "idpathcacher",
+    "pantransfercacher",
+    "lifeeventcacher",
+    "r302cacher",
+    "DirectoryCache",
+]
+
+
+from abc import ABC, abstractmethod
+from pathlib import Path
+from typing import List, Dict, MutableMapping, Optional, Union, Set
 from time import time
 
 from cachetools import TTLCache as MemoryTTLCache
+from diskcache import Cache as DiskCache
 
 from app.core.cache import Cache, LRUCache
+from app.core.config import settings
+from app.helper.redis import RedisHelper
 
 
 class IdPathCache:
@@ -148,6 +162,136 @@ class R302Cache:
         清空所有缓存
         """
         self._cache.clear(region=self.region)
+
+
+class BaseCacheDirectory(ABC):
+    """
+    缓存目录的抽象基类
+    """
+
+    @abstractmethod
+    def add_to_group(self, group_name: str, paths: Union[str, List[str]]):
+        pass
+
+    @abstractmethod
+    def is_in_cache(self, group_name: str, path: str) -> bool:
+        pass
+
+    @abstractmethod
+    def get_group_paths(self, group_name: str) -> Set[str]:
+        pass
+
+    @abstractmethod
+    def clear_group(self, group_name: str):
+        pass
+
+    @abstractmethod
+    def close(self):
+        pass
+
+
+class DiskCacheDirectory(BaseCacheDirectory):
+    """
+    使用 diskcache 的目录缓存器
+    """
+
+    def __init__(self, cache_directory: Path):
+        if not cache_directory.exists():
+            cache_directory.mkdir(parents=True, exist_ok=True)
+        self._cache = DiskCache(cache_directory.as_posix())
+
+    def add_to_group(self, group_name: str, paths: Union[str, List[str]]):
+        paths_to_add = {paths} if isinstance(paths, str) else set(paths)
+        with self._cache.transact():
+            existing_paths = self._cache.get(group_name, set())
+            updated_paths = existing_paths.union(paths_to_add)
+            self._cache.set(group_name, updated_paths)
+
+    def is_in_cache(self, group_name: str, path: str) -> bool:
+        directory_set = self._cache.get(group_name)
+        return directory_set is not None and path in directory_set
+
+    def get_group_paths(self, group_name: str) -> Set[str]:
+        return self._cache.get(group_name, set())
+
+    def clear_group(self, group_name: str):
+        with self._cache.transact():
+            if group_name in self._cache:
+                del self._cache[group_name]
+
+    def close(self):
+        self._cache.close()
+
+
+class RedisCacheDirectory(BaseCacheDirectory):
+    """
+    使用 Redis 的目录缓存器
+    """
+
+    def __init__(self):
+        self.redis_helper = RedisHelper()
+        self.redis_helper._connect()
+        self.client = self.redis_helper.client
+        if self.client is None:
+            raise ConnectionError("无法从 RedisHelper 获取有效的 Redis 客户端。")
+
+    def _make_set_key(self, group_name: str) -> str:
+        """
+        为我们的 Set 创建一个独立的、带前缀的键名，避免与 RedisHelper 中的其他键冲突
+        """
+        return f"dir_cache_set:{group_name}"
+
+    def add_to_group(self, group_name: str, paths: Union[str, List[str]]):
+        key = self._make_set_key(group_name)
+        paths_to_add = [paths] if isinstance(paths, str) else paths
+        if paths_to_add:
+            self.client.sadd(key, *paths_to_add)
+
+    def is_in_cache(self, group_name: str, path: str) -> bool:
+        key = self._make_set_key(group_name)
+        return self.client.sismember(key, path)
+
+    def get_group_paths(self, group_name: str) -> Set[str]:
+        key = self._make_set_key(group_name)
+        byte_set = self.client.smembers(key)
+        return {b.decode('utf-8') for b in byte_set}
+
+    def clear_group(self, group_name: str):
+        key = self._make_set_key(group_name)
+        self.client.delete(key)
+
+    def close(self):
+        pass
+
+
+class DirectoryCache:
+    """
+    一个支持 diskcache 和 Redis 后端的目录缓存模块。
+    """
+
+    def __init__(self, cache_directory: Optional[Path] = None):
+        """
+        初始化目录缓存
+        """
+        if settings.CACHE_BACKEND_TYPE == "redis":
+            self._storage: BaseCacheDirectory = RedisCacheDirectory()
+        else:
+            self._storage: BaseCacheDirectory = DiskCacheDirectory(cache_directory)
+
+    def add_to_group(self, group_name: str, paths: Union[str, List[str]]):
+        self._storage.add_to_group(group_name, paths)
+
+    def is_in_cache(self, group_name: str, path: str) -> bool:
+        return self._storage.is_in_cache(group_name, path)
+
+    def get_group_paths(self, group_name: str) -> Set[str]:
+        return self._storage.get_group_paths(group_name)
+
+    def clear_group(self, group_name: str):
+        self._storage.clear_group(group_name)
+
+    def close(self):
+        self._storage.close()
 
 
 idpathcacher = IdPathCache(maxsize=4096)

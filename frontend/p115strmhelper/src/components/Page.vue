@@ -723,7 +723,7 @@
         <v-window v-model="offlineDownloadDialog.activeTab" touchless>
           <!-- 任务列表 -->
           <v-window-item value="tasks">
-            <div style="overflow-x: auto;">
+            <div style="overflow-x: auto;" @touchstart.stop @touchmove.stop @touchend.stop>
               <v-alert v-if="offlineDownloadDialog.error" type="error" density="compact" class="ma-3" variant="tonal">
                 {{ offlineDownloadDialog.error }}
               </v-alert>
@@ -731,7 +731,7 @@
                 :items-length="offlineDownloadDialog.totalTasks" :loading="offlineDownloadDialog.loading"
                 :items-per-page="offlineDownloadDialog.itemsPerPage" @update:options="fetchOfflineTasks"
                 density="compact" class="ma-2" no-data-text="没有离线下载任务" loading-text="正在加载任务..."
-                items-per-page-text="每页条目数" style="min-width: 700px;">
+                items-per-page-text="每页条目数" style="min-width: 700px;" @touchstart.stop @touchmove.stop @touchend.stop>
                 <template v-slot:item.progress="{ item }">
                   <div class="d-flex align-center">
                     <v-progress-linear :model-value="item.percent" :color="getTaskStatusColor(item.status)"
@@ -879,7 +879,7 @@
         确认操作
       </v-card-title>
       <v-card-text>
-        您确定要立即执行全量同步数据库吗？该操作会清理缓存并覆盖数据库
+        您确定要立即执行全量同步数据库吗？该操作会覆盖原有数据库数据
       </v-card-text>
       <v-card-actions>
         <v-spacer></v-spacer>
@@ -986,10 +986,10 @@ const offlineDownloadDialog = reactive({
   totalTasks: 0,
   itemsPerPage: 10,
   headers: [
-    { title: '文件名', key: 'name', align: 'start', sortable: false },
-    { title: '大小', key: 'size_text', align: 'end', sortable: false, cellProps: { class: 'text-no-wrap' }, minWidth: '110px' },
-    { title: '状态', key: 'status_text', align: 'center', sortable: false },
-    { title: '进度', key: 'progress', align: 'start', sortable: false, minWidth: '160px' },
+    { title: '文件名', key: 'name', align: 'start', sortable: false, minWidth: '200px' },
+    { title: '大小', key: 'size_text', align: 'end', sortable: false, cellProps: { class: 'text-no-wrap' }, minWidth: '80px' },
+    { title: '状态', key: 'status_text', align: 'center', sortable: false, minWidth: '80px' },
+    { title: '进度', key: 'progress', align: 'start', sortable: false, minWidth: '120px' },
   ],
   links: '',
   destPath: '',
@@ -1711,6 +1711,38 @@ async function fetchUserStorageStatus() {
 
   100% {
     transform: rotate(360deg);
+  }
+}
+
+/* 手机端离线下载表格优化 */
+@media (max-width: 768px) {
+  :deep(.v-data-table) {
+    font-size: 0.8rem;
+  }
+
+  :deep(.v-data-table .v-data-table__td) {
+    padding: 8px 4px !important;
+  }
+
+  :deep(.v-data-table .v-data-table__th) {
+    padding: 8px 4px !important;
+    font-size: 0.75rem;
+  }
+
+  /* 防止表格在手机上的触摸滑动触发标签页切换 */
+  :deep(.v-data-table) {
+    touch-action: pan-x;
+  }
+
+  /* 优化进度条在手机上的显示 */
+  :deep(.v-progress-linear) {
+    height: 6px !important;
+  }
+
+  /* 优化芯片在手机上的显示 */
+  :deep(.v-chip) {
+    font-size: 0.7rem;
+    height: 20px;
   }
 }
 </style>

@@ -12,9 +12,9 @@ from p115client.tool.iterdir import (
     iter_files_with_path_skim,
 )
 
+from app.core.config import settings
 from app.log import logger
 
-from ...core.cache import idpathcacher
 from ...core.config import configer
 from ...db_manager.oper import FileDbHelper
 from ...helper.mediainfo_download import MediaInfoDownloader
@@ -27,6 +27,9 @@ from ...utils.path import PathUtils, PathRemoveUtils
 from ...utils.sentry import sentry_manager
 from ...utils.strm import StrmUrlGetter, StrmGenerater
 from ...utils.tree import DirectoryTree
+from ...utils.http import check_iter_path_data
+from ...utils.base64 import CBase64
+from ...utils.math import MathUtils
 
 
 class FullSyncStrmHelper:
@@ -80,13 +83,25 @@ class FullSyncStrmHelper:
             configer.mediainfo_download_blacklist
         )
 
-        self.local_tree = configer.PLUGIN_TEMP_PATH / "local_tree.txt"
-        self.pan_tree = configer.PLUGIN_TEMP_PATH / "pan_tree.txt"
+        self.local_tree_path = configer.PLUGIN_TEMP_PATH / "local_tree.txt"
+        self.pan_tree_path = configer.PLUGIN_TEMP_PATH / "pan_tree.txt"
+        self.local_tree = DirectoryTree(self.local_tree_path)
+        self.pan_tree = DirectoryTree(self.pan_tree_path)
 
         if configer.full_sync_strm_log:
             self.__base_logger = self.__base_has_logger
         else:
             self.__base_logger = self.__base_no_logger
+
+    def __del__(self):
+        self._clean_tree()
+
+    def _clean_tree(self):
+        """
+        清理目录树文件
+        """
+        self.local_tree.clear()
+        self.pan_tree.clear()
 
     @staticmethod
     def __base_no_logger(level, msg, *args):
@@ -103,24 +118,40 @@ class FullSyncStrmHelper:
         log_method = getattr(logger, level)
         log_method(msg, *args)
 
+    def __get_remove_unless_strm(self, path_base64: str) -> Dict:
+        """
+        获取删除信息
+        """
+        data: dict = configer.get_plugin_data("full_remove_unless_strm")
+        if data:
+            return data.get(path_base64, {})
+        return {}
+
+    def __save_remove_unless_strm(self, path_base64: str, value: Dict):
+        """
+        保存删除信息
+        """
+        data: Dict | None = configer.get_plugin_data("full_remove_unless_strm")
+        if data:
+            data[path_base64] = value
+        else:
+            data = {path_base64: value}
+        configer.save_plugin_data("full_remove_unless_strm", data)
+
     def __remove_unless_strm_local(self, target_dir: str) -> threading.Thread:
         """
         清理无效 STRM 本地扫描
         """
-        if Path(self.local_tree).exists():
-            Path(self.local_tree).unlink(missing_ok=True)
-        if Path(self.pan_tree).exists():
-            Path(self.pan_tree).unlink(missing_ok=True)
+        self._clean_tree()
 
-        def background_task(_target_dir, local_tree):
+        def background_task(_target_dir):
             """
             后台运行任务
             """
             logger.info(f"【全量STRM生成】开始扫描本地媒体库文件: {_target_dir}")
             try:
-                DirectoryTree().scan_directory_to_tree(
+                self.local_tree.scan_directory_to_tree(
                     root_path=_target_dir,
-                    output_file=local_tree,
                     append=False,
                     extensions=[".strm"],
                 )
@@ -132,10 +163,7 @@ class FullSyncStrmHelper:
 
         local_tree_task_thread = threading.Thread(
             target=background_task,
-            args=(
-                target_dir,
-                self.local_tree,
-            ),
+            args=(target_dir,),
         )
         local_tree_task_thread.start()
 
@@ -185,8 +213,10 @@ class FullSyncStrmHelper:
                 )
                 seen_file_ids.add(file_id)
 
-        self.databasehelper.upsert_batch_by_list("files", files_list)
-        self.databasehelper.upsert_batch_by_list("folders", folders_list)
+        if files_list:
+            self.databasehelper.upsert_batch_by_list("files", files_list)
+        if folders_list:
+            self.databasehelper.upsert_batch_by_list("folders", folders_list)
 
         return seen_folder_ids, seen_file_ids
 
@@ -199,14 +229,7 @@ class FullSyncStrmHelper:
         path_entry = None
         try:
             # 判断是否有信息缺失
-            if "path" not in item:
-                raise FileItemKeyMiss(f"缺失 path 信息：{item}")
-            if "is_dir" not in item:
-                raise FileItemKeyMiss(f"缺失 is_dir 信息：{item}")
-            if "sha1" not in item:
-                raise FileItemKeyMiss(f"缺失 sha1 信息：{item}")
-            if ("pickcode" not in item) and ("pick_code" not in item):
-                raise FileItemKeyMiss(f"缺失 pickcode 信息：{item}")
+            check_iter_path_data(item)
             # 判断是否为文件夹
             if item["is_dir"]:
                 return path_entry
@@ -219,6 +242,15 @@ class FullSyncStrmHelper:
             original_file_name = file_path.name
             file_name = file_path.stem + ".strm"
             new_file_path = file_target_dir / file_name
+        except FileItemKeyMiss as e:
+            logger.error(
+                "【全量STRM生成】生成 STRM 文件失败: %s  %s",
+                str(item),
+                e,
+            )
+            self.strm_fail_count += 1
+            self.strm_fail_dict[str(item)] = str(e)
+            return path_entry
         except Exception as e:
             sentry_manager.sentry_hub.capture_exception(e)
             logger.error(
@@ -332,7 +364,7 @@ class FullSyncStrmHelper:
                         f"【全量STRM生成】{new_file_path} 已存在，覆盖模式 {self.overwrite_mode}",
                     )
 
-            pickcode = item.get("pickcode", item.get("pick_code", None))
+            pickcode = item.get("pickcode", item.get("pick_code", ""))
 
             new_file_path.parent.mkdir(parents=True, exist_ok=True)
 
@@ -441,9 +473,6 @@ class FullSyncStrmHelper:
                 )
                 return False
 
-        logger.info("【全量STRM生成】全量更新数据库清空缓存数据...")
-        idpathcacher.clear()
-
         logger.info(
             f"【全量STRM生成】全量更新数据库完成，时间 {self.elapsed_time:.6f} 秒，数据库写入量 {self.total_db_write_count} 条"
         )
@@ -456,6 +485,7 @@ class FullSyncStrmHelper:
         for path in media_paths:
             if not path:
                 continue
+            path_base64 = CBase64.encode(str(path).encode("utf-8"))
             parts = path.split("#", 1)
             pan_media_dir = parts[1]
             target_dir = parts[0]
@@ -549,9 +579,7 @@ class FullSyncStrmHelper:
                             )
 
                     if self.remove_unless_strm:
-                        DirectoryTree().generate_tree_from_list(
-                            path_list, self.pan_tree, append=True
-                        )
+                        self.pan_tree.generate_tree_from_list(path_list, append=True)
 
                 end_time = time.perf_counter()
                 self.elapsed_time += end_time - start_time
@@ -565,29 +593,81 @@ class FullSyncStrmHelper:
                 return False
 
             if self.remove_unless_strm:
-                while local_tree_task_thread.is_alive():
+                while local_tree_task_thread.is_alive():  # noqa
                     logger.info("【全量STRM生成】扫描本地媒体库运行中...")
                     time.sleep(10)
-                if not self.strm_fail_dict and Path(self.local_tree).exists():
+                if (
+                    not self.strm_fail_dict
+                    and (
+                        settings.CACHE_BACKEND_TYPE == "redis"
+                        or self.local_tree_path.exists()
+                    )
+                    and self.local_tree.count() != 0
+                ):
                     try:
-                        count = DirectoryTree().compare_file_lines(
-                            self.local_tree, self.pan_tree
+                        counts = self.__get_remove_unless_strm(path_base64).get(
+                            "counts", []
                         )
-                        if count > 500:
+                        local_tree_count = self.local_tree.count()
+                        remove_count = self.local_tree.compare_entry_counts(
+                            self.pan_tree
+                        )
+                        rp = (remove_count / local_tree_count) * 100
+                        if rp > configer.full_sync_remove_unless_max_threshold:
+                            # 在阈值范围外，进行数据稳定性测试
                             logger.warn(
-                                f"【全量STRM生成】本次将删除文件个数为 {count}，超过安全阈值不进行删除操作"
+                                f"【全量STRM生成】本次将删除文件个数为 {remove_count}，超过安全阈值 {configer.full_sync_remove_unless_max_threshold}% 不进行删除操作"
                             )
-                            continue
-                        for path in DirectoryTree().compare_trees(
-                            self.local_tree, self.pan_tree
-                        ):
+
+                            counts.append(remove_count)
+                            if len(counts) < 3:
+                                logger.info(
+                                    f"【全量STRM生成】删除数据稳定性检查，已收集 {len(counts)}/3 个数据点 {counts}"
+                                )
+                                self.__save_remove_unless_strm(
+                                    path_base64, {"counts": counts}
+                                )
+                                continue
+
+                            if MathUtils.is_stable_cv(
+                                counts,
+                                configer.full_sync_remove_unless_stable_threshold / 100,
+                            ):
+                                logger.info(
+                                    f"【全量STRM生成】删除数据稳定性检查通过: {counts}"
+                                )
+                                self.__save_remove_unless_strm(
+                                    path_base64, {"counts": []}
+                                )
+                            else:
+                                logger.warn(
+                                    f"【全量STRM生成】删除数据稳定性检查失败，重置计数器: {counts}"
+                                )
+                                self.__save_remove_unless_strm(
+                                    path_base64, {"counts": [remove_count]}
+                                )
+                                continue
+                        else:
+                            # 在阈值内，且存在计数，则清空
+                            if len(counts) > 0:
+                                self.__save_remove_unless_strm(
+                                    path_base64, {"counts": []}
+                                )
+
+                        for remove_path in self.local_tree.compare_trees(self.pan_tree):
                             logger.info(f"【全量STRM生成】清理无效 STRM 文件: {path}")
-                            Path(path).unlink(missing_ok=True)
-                            PathRemoveUtils.remove_parent_dir(
-                                file_path=Path(path),
-                                mode="all",
-                                func_type="【全量STRM生成】",
-                            )
+                            Path(remove_path).unlink(missing_ok=True)
+                            if configer.full_sync_remove_unless_file:
+                                PathRemoveUtils.clean_related_files(
+                                    file_path=Path(remove_path),
+                                    func_type="【全量STRM生成】",
+                                )
+                            if configer.full_sync_remove_unless_dir:
+                                PathRemoveUtils.remove_parent_dir(
+                                    file_path=Path(remove_path),
+                                    mode=["strm"],
+                                    func_type="【全量STRM生成】",
+                                )
                             self.remove_unless_strm_count += 1
                     except Exception as e:
                         sentry_manager.sentry_hub.capture_exception(e)

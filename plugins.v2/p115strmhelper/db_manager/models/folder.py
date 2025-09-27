@@ -81,12 +81,6 @@ class Folder(P115StrmHelperBase):
         """
         通过列表批量写入或更新数据
         """
-        db.execute(text("PRAGMA synchronous = OFF"))
-        db.execute(text("PRAGMA journal_mode = OFF"))
-        db.execute(text("PRAGMA cache_size = -100000"))
-        db.execute(text("PRAGMA locking_mode = EXCLUSIVE"))
-        db.execute(text("PRAGMA temp_store = MEMORY"))
-
         stmt = sqlite_insert(Folder).prefix_with("OR REPLACE")
         db.execute(stmt, batch)
         return True

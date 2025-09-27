@@ -111,7 +111,11 @@ class SentryManager:
             {"type": OSError, "message": "File name too long"},
             {"type": OSError, "message": "Read-only file system"},
             {"type": OSError, "message": "Stale file handle"},
+            {"type": OSError, "message": "No space left on device"},
+            {"type": OSError, "message": "Input/output error"},
             {"type": PermissionError, "message": "Permission denied"},
+            {"type": FileNotFoundError, "message": "No such file or directory"},
+            {"type": NotADirectoryError},
         ]
 
         self.reload_config()

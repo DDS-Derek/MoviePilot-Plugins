@@ -18,7 +18,7 @@ from fastapi.responses import JSONResponse
 
 from .service import servicer
 from .core.config import configer
-from .core.cache import idpathcacher
+from .core.cache import idpathcacher, DirectoryCache
 from .core.message import post_message
 from .core.i18n import i18n
 from .core.aliyunpan import AliyunPanLogin
@@ -622,11 +622,19 @@ class Api:
                     error_message, status_code=status.HTTP_500_INTERNAL_SERVER_ERROR
                 )
 
+        file_name = url["file_name"]
+        try:
+            file_name.encode("ascii")
+            content_disposition = f'attachment; filename="{file_name}"'
+        except UnicodeEncodeError:
+            encoded_filename = quote(file_name, safe="")
+            content_disposition = f"attachment; filename*=UTF-8''{encoded_filename}"
+
         return Response(
             status_code=status.HTTP_302_FOUND,
             headers={
                 "Location": url,
-                "Content-Disposition": f'attachment; filename="{quote(url["file_name"])}"',
+                "Content-Disposition": content_disposition,
             },
             media_type="application/json; charset=utf-8",
             content=dumps({"status": "redirecting", "url": url}),
@@ -675,6 +683,23 @@ class Api:
             return ApiResponse(msg="分享同步任务已启动")
         except Exception as e:
             return ApiResponse(code=1, msg=f"启动分享同步任务失败: {str(e)}")
+
+    @staticmethod
+    def clear_id_path_cache_api() -> ApiResponse:
+        """
+        清理文件路径ID缓存
+        """
+        idpathcacher.clear()
+        return ApiResponse(msg="文件路径ID缓存已清理")
+
+    @staticmethod
+    def clear_increment_skip_cache_api() -> ApiResponse:
+        """
+        清理增量同步跳过路径缓存
+        """
+        directory_cache = DirectoryCache(configer.PLUGIN_TEMP_PATH / "increment_skip")
+        directory_cache.clear_group("increment_skip")
+        return ApiResponse(msg="增量同步跳过路径缓存已清理")
 
     @staticmethod
     def get_status_api() -> ApiResponse[PluginStatusData]:

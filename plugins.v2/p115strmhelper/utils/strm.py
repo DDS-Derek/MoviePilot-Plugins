@@ -1,5 +1,6 @@
 from pathlib import Path
 from typing import Optional
+from urllib.parse import quote
 
 from app.core.config import settings
 
@@ -19,6 +20,7 @@ class StrmUrlGetter:
             self.strmurlmoderesolver = StrmUrlModeResolver(
                 configer.strm_url_mode_custom, configer.strm_url_format
             )
+        self.strm_url_encode = configer.strm_url_encode
 
     def get_strm_url(self, pickcode: str, file_name: str) -> str:
         """
@@ -34,6 +36,8 @@ class StrmUrlGetter:
 
         strm_url = f"{configer.moviepilot_address.rstrip('/')}/api/v1/plugin/P115StrmHelper/redirect_url?apikey={settings.API_TOKEN}&pickcode={pickcode}"
         if strm_url_format == "pickname":
+            if self.strm_url_encode:
+                file_name = quote(file_name)
             strm_url += f"&file_name={file_name}"
 
         return strm_url

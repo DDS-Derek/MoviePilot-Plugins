@@ -1,8 +1,8 @@
-import shutil
 import time
+from shutil import rmtree
 from collections import defaultdict
 from threading import Timer
-from typing import List, Set
+from typing import List, Set, Dict, Optional
 from pathlib import Path
 from itertools import batched, chain
 
@@ -16,6 +16,8 @@ from ..utils.sentry import sentry_manager
 from ..utils.strm import StrmUrlGetter, StrmGenerater
 from ..utils.automaton import AutomatonUtils
 from ..utils.mediainfo_download import MediainfoDownloadMiddleware
+from ..utils.http import check_iter_path_data
+from ..utils.exception import FileItemKeyMiss
 from ..db_manager.oper import FileDbHelper
 from ..helper.mediainfo_download import MediaInfoDownloader
 from ..helper.mediasyncdel import MediaSyncDelHelper
@@ -131,7 +133,7 @@ class MonitorLife:
             "mediainfo_count": 0,
         }
 
-    def _get_path_by_cid(self, cid: int):
+    def _get_path_by_cid(self, cid: int) -> Optional[Path]:
         """
         通过 cid 获取路径
         先从缓存获取，再从数据库获取，最后通过API获取
@@ -143,7 +145,7 @@ class MonitorLife:
         if not dir_path:
             data = _databasehelper.get_by_id(id=cid)
             if data:
-                dir_path = data.get("path", None)
+                dir_path = data.get("path", "")
                 if dir_path:
                     logger.debug(f"获取 {cid} 路径（数据库）: {dir_path}")
                     idpathcacher.add_cache(id=cid, directory=str(dir_path))
@@ -158,13 +160,14 @@ class MonitorLife:
         logger.debug(f"获取 {cid} 路径（缓存）: {dir_path}")
         return Path(dir_path)
 
-    def media_transfer(self, event, file_path: Path, rmt_mediaext):
+    def media_transfer(self, event: Dict, file_path: Path, rmt_mediaext):
         """
         运行媒体文件整理
         :param event: 事件
         :param file_path: 文件路径
         :param rmt_mediaext: 媒体文件后缀名
         """
+        org_file_path = file_path.as_posix()
         _databasehelper = FileDbHelper()
         transferchain = TransferChain()
         file_category = event["file_category"]
@@ -179,9 +182,16 @@ class MonitorLife:
             if str(event["file_id"]) not in pantransfercacher.delete_pan_transfer_list:
                 pantransfercacher.delete_pan_transfer_list.append(str(event["file_id"]))
             for item in iter_files_with_path(
-                self._client, cid=int(file_id), cooldown=2
+                self._client, cid=int(file_id), with_ancestors=True, cooldown=2
             ):
+                try:
+                    check_iter_path_data(item)
+                except FileItemKeyMiss as e:
+                    logger.warning(f"【网盘整理】数据拉取异常: {e}")
+                    continue
                 file_path = Path(item["path"])
+                if not PathUtils.has_prefix(file_path, org_file_path):
+                    continue
                 # 缓存文件夹ID
                 if (
                     str(item["parent_id"])
@@ -285,7 +295,7 @@ class MonitorLife:
                 )
                 logger.info(f"【网盘整理】{file_path} 加入整理列队")
 
-    def creata_strm(self, event, file_path):
+    def creata_strm(self, event: Dict, file_path: Path):
         """
         创建 STRM 文件
         """
@@ -293,6 +303,7 @@ class MonitorLife:
 
         _get_url = StrmUrlGetter()
 
+        org_file_path = file_path.as_posix()
         pickcode = event["pick_code"]
         file_category = event["file_category"]
         file_id = event["file_id"]
@@ -308,14 +319,23 @@ class MonitorLife:
             mediainfo_count = 0
             strm_count = 0
             _databasehelper.upsert_batch(
-                _databasehelper.process_life_dir_item(event=event, file_path=file_path)
+                _databasehelper.process_life_dir_item(
+                    event=event, file_path=file_path.as_posix()
+                )
             )
             for batch in batched(
-                iter_files_with_path(self._client, cid=int(file_id), cooldown=2),
+                iter_files_with_path(
+                    self._client, cid=int(file_id), with_ancestors=True, cooldown=2
+                ),
                 7_000,
             ):
                 processed = []
                 for item in batch:
+                    try:
+                        check_iter_path_data(item)
+                    except FileItemKeyMiss as e:
+                        logger.warning(f"【监控生活事件】数据拉取异常: {e}")
+                        continue
                     _process_item = _databasehelper.process_item(item)
                     if _process_item not in processed:
                         processed.extend(_process_item)
@@ -323,6 +343,8 @@ class MonitorLife:
                         continue
                     if "creata" in configer.get_config("monitor_life_event_modes"):  # pylint: disable=E1135
                         file_path = item["path"]
+                        if not PathUtils.has_prefix(file_path, org_file_path):
+                            continue
                         file_path = Path(target_dir) / Path(file_path).relative_to(
                             pan_media_dir
                         )
@@ -455,7 +477,9 @@ class MonitorLife:
                     self._schedule_notification()
         else:
             _databasehelper.upsert_batch(
-                _databasehelper.process_life_file_item(event=event, file_path=file_path)
+                _databasehelper.process_life_file_item(
+                    event=event, file_path=file_path.as_posix()
+                )
             )
             if "creata" in configer.get_config("monitor_life_event_modes"):  # pylint: disable=E1135
                 # 文件情况，直接生成
@@ -587,7 +611,7 @@ class MonitorLife:
                     file_name=str(original_file_name),
                 )
 
-    def remove_strm(self, event):
+    def remove_strm(self, event: Dict):
         """
         删除 STRM 文件
         """
@@ -687,7 +711,7 @@ class MonitorLife:
                 return
             if file_category == 0:
                 # 删除目录
-                shutil.rmtree(Path(file_path))
+                rmtree(Path(file_path))
             else:
                 # 删除文件
                 Path(file_path).unlink(missing_ok=True)
@@ -738,7 +762,7 @@ class MonitorLife:
         except Exception as e:
             logger.error(f"【监控生活事件】{file_path} 删除失败: {e}")
 
-    def new_creata_path(self, event):
+    def new_creata_path(self, event: Dict):
         """
         处理新出现的路径
         """

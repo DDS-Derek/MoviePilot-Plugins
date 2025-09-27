@@ -309,6 +309,20 @@ class P115StrmHelper(_PluginBase):
                 "summary": "执行分享同步",
             },
             {
+                "path": "/clear_id_path_cache",
+                "endpoint": self.api.clear_id_path_cache_api,
+                "methods": ["POST"],
+                "auth": "bear",
+                "summary": "清理文件路径ID缓存",
+            },
+            {
+                "path": "/clear_increment_skip_cache",
+                "endpoint": self.api.clear_increment_skip_cache_api,
+                "methods": ["POST"],
+                "auth": "bear",
+                "summary": "清理增量同步跳过路径缓存",
+            },
+            {
                 "path": "/browse_dir",
                 "endpoint": self.api.browse_dir_api,
                 "methods": ["GET"],

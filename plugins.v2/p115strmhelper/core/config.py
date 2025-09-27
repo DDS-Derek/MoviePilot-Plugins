@@ -3,7 +3,7 @@ from typing import Dict, Any, Optional, List, Union
 from pathlib import Path
 
 from orjson import loads, JSONDecodeError
-from pydantic import BaseModel, ValidationError, Field
+from pydantic import BaseModel, ValidationError, Field, root_validator
 
 from app.log import logger
 from app.core.config import settings
@@ -15,6 +15,7 @@ from ..version import VERSION
 from ..core.aliyunpan import AliyunPanLogin
 from ..schemas.cookie import U115Cookie
 from ..utils.machineid import MachineID
+from ..utils.cron import CronUtils
 
 
 class ConfigManager(BaseModel):
@@ -57,6 +58,35 @@ class ConfigManager(BaseModel):
         arbitrary_types_allowed = True
         validate_assignment = True
         json_encoders = {Path: str}
+
+    @root_validator(allow_reuse=True)
+    @classmethod
+    def validate_cron_fields(cls, values: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        验证和修复 cron 表达式字段
+        """
+        cron_fields = ["cron_full_sync_strm", "increment_sync_cron", "cron_clear"]
+
+        for field in cron_fields:
+            if field in values and values[field]:
+                cron_expr = values[field]
+                status, msg = CronUtils.validate_cron_expression(cron_expr)
+                if not status:
+                    logger.warning(msg)
+                    # 尝试修复 cron 表达式
+                    fixed_cron_expr = CronUtils.fix_cron_expression(cron_expr)
+                    if CronUtils.is_valid_cron(fixed_cron_expr):
+                        values[field] = fixed_cron_expr
+                        logger.info(
+                            f"自动修复 {field}: '{cron_expr}' -> '{fixed_cron_expr}'"
+                        )
+                    else:
+                        logger.error(
+                            f"无法修复无效的 {field}: '{cron_expr}'，恢复默认值 '{CronUtils.get_default_cron()}'"
+                        )
+                        values[field] = CronUtils.get_default_cron()
+
+        return values
 
     # 插件名称
     PLUSIN_NAME: str = Field("P115StrmHelper", min_length=1)
@@ -122,12 +152,20 @@ class ConfigManager(BaseModel):
     full_sync_overwrite_mode: str = "never"
     # 清理无效 STRM 文件
     full_sync_remove_unless_strm: bool = False
+    # 清理无效 STRM 目录（即无 STRM 文件的目录）
+    full_sync_remove_unless_dir: bool = False
+    # 清理无效 STRM 文件关联的媒体信息文件
+    full_sync_remove_unless_file: bool = False
+    # 清理无效 STRM 最大删除阈值
+    full_sync_remove_unless_max_threshold: int = 10
+    # 清理无效 STRM 稳定阈值
+    full_sync_remove_unless_stable_threshold: int = 5
     # 定期全量同步开关
     timing_full_sync_strm: bool = False
     # 下载媒体信息文件开关
     full_sync_auto_download_mediainfo_enabled: bool = False
     # 定期全量同步周期
-    cron_full_sync_strm: Optional[str] = None
+    cron_full_sync_strm: Optional[str] = "0 */12 * * *"
     # 全量生成最小文件大小
     full_sync_min_file_size: Optional[int] = None
     # 全量同步路径
@@ -146,7 +184,7 @@ class ConfigManager(BaseModel):
     # 下载媒体信息文件开关
     increment_sync_auto_download_mediainfo_enabled: bool = False
     # 运行周期
-    increment_sync_cron: Optional[str] = None
+    increment_sync_cron: Optional[str] = "0 */2 * * *"
     # 增量同步目录
     increment_sync_strm_paths: Optional[str] = None
     # MP-媒体库 目录转换
@@ -209,7 +247,7 @@ class ConfigManager(BaseModel):
     # 清理 最近接收 目录开关
     clear_receive_path_enabled: bool = False
     # 清理周期
-    cron_clear: Optional[str] = None
+    cron_clear: Optional[str] = "0 */7 * * *"
 
     # 网盘整理开关
     pan_transfer_enabled: bool = False
@@ -273,6 +311,8 @@ class ConfigManager(BaseModel):
     mediainfo_download_whitelist: Optional[List] = None
     # 媒体信息文件下载黑名单
     mediainfo_download_blacklist: Optional[List] = None
+    # STRM URL 文件名称编码
+    strm_url_encode: bool = False
 
     # WebDAV 开关
     webdav_enabled: bool = True
