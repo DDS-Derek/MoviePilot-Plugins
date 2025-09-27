@@ -1,11 +1,15 @@
 import shutil
 import logging
+import tempfile
 from io import BytesIO
 from pathlib import Path
 import posixpath
+import urllib.parse
 from posixpath import splitext
-from typing import Mapping, Optional, Dict, Union
+from typing import Optional, Dict, Union
+from collections.abc import MutableMapping
 
+import httpx
 from encode_uri import encode_uri_component_loose
 from property import locked_cacheproperty
 
@@ -21,6 +25,33 @@ from ...utils.strm import StrmGenerater
 
 
 logger = logging.getLogger(__name__)
+
+
+class MutableDict(MutableMapping):
+    """
+    自定义字典
+    """
+
+    def __init__(self, *args, **kwargs):
+        self._data = dict(*args, **kwargs)
+
+    def __getitem__(self, key):
+        return self._data[key]
+
+    def __setitem__(self, key, value):
+        self._data[key] = value
+
+    def __delitem__(self, key):
+        del self._data[key]
+
+    def __iter__(self):
+        return iter(self._data)
+
+    def __len__(self):
+        return len(self._data)
+
+    def __repr__(self):
+        return repr(self._data)
 
 
 class UTF8PathCorrectionMiddleware:
@@ -49,7 +80,7 @@ class WebDAVResourceBase:
     WebDAV资源基类
     """
 
-    def __init__(self, path: str, environ: dict, attr: Mapping):
+    def __init__(self, path: str, environ: dict, attr: MutableDict):
         self.path = path
         self.environ = environ
         self.attr = attr
@@ -138,7 +169,7 @@ class WebDAVFileResource(WebDAVResourceBase, DAVNonCollection):
         self,
         path: str,
         environ: dict,
-        attr: Mapping,
+        attr: MutableDict,
         is_strm: bool = False,
         is_media_info: bool = False,
         local_path: Optional[str] = None,
@@ -191,7 +222,6 @@ class WebDAVFileResource(WebDAVResourceBase, DAVNonCollection):
             f"?apikey={settings.API_TOKEN}&pickcode={self.attr['pickcode']}&file_name={name}"
         )
 
-    # TODO 待重构
     def get_content(self):
         """
         获取文件内容
@@ -203,20 +233,21 @@ class WebDAVFileResource(WebDAVResourceBase, DAVNonCollection):
                 return open(self.local_path, "rb")
             else:
                 try:
-                    import requests
-
-                    response = requests.get(self.url, stream=True, timeout=30)
-                    response.raise_for_status()
-                    import tempfile
-
-                    temp_file = tempfile.NamedTemporaryFile(delete=False)
-                    for chunk in response.iter_content(chunk_size=8192):
-                        if chunk:
+                    with httpx.stream(
+                        "GET", self.url, timeout=30, follow_redirects=True
+                    ) as response:
+                        response.raise_for_status()
+                        temp_file = tempfile.NamedTemporaryFile(delete=False)
+                        for chunk in response.iter_bytes(chunk_size=8192):
                             temp_file.write(chunk)
-                    temp_file.close()
-
-                    return open(temp_file.name, "rb")
-                except Exception as download_error:
+                        temp_file.close()
+                        return open(temp_file.name, "rb")
+                except httpx.RequestError as download_error:
+                    placeholder_content = f"# Cloud Drive File (Download Failed)\n# Original URL: {self.url}\n# Error: {download_error}\n# Please try accessing the file directly.\n".encode(
+                        "utf-8"
+                    )
+                    return BytesIO(placeholder_content)
+                except httpx.HTTPStatusError as download_error:
                     placeholder_content = f"# Cloud Drive File (Download Failed)\n# Original URL: {self.url}\n# Error: {download_error}\n# Please try accessing the file directly.\n".encode(
                         "utf-8"
                     )
@@ -340,36 +371,65 @@ class WebDAVFileResource(WebDAVResourceBase, DAVNonCollection):
         except Exception as e:
             raise DAVError(500, f"Error deleting file: {e}") from e
 
-    def move_recursive(self, dest_path: str):
+    def support_recursive_move(self, dest_path: str) -> bool:
         """
-        移动文件
+        告诉框架我们支持一个高效的、原生的移动实现
         """
-        if self.is_pan_file:
-            raise DAVError(403, "Cannot move cloud drive file (read-only)")
+        return False
+
+    def copy_move_single(self, dest_path: str, *, is_move: bool):
+        """
+        实现单个文件的移动或复制。
+        """
+        op_name = "move" if is_move else "copy"
+
+        if self.is_readonly():
+            raise DAVError(403, f"Cannot {op_name} cloud drive file (read-only).")
 
         if not self.local_path:
-            raise DAVError(403, "Cannot move file without a local path")
+            raise DAVError(403, f"Cannot {op_name} a file without a local path.")
+
         if not self.provider:
-            raise DAVError(500, "Provider not available for path resolution")
+            raise DAVError(500, "Provider not available for path resolution.")
 
         dest_local_path = self.provider._get_local_path_from_dav(dest_path)
+        source_local_path = Path(self.local_path)
+
+        if not source_local_path.exists():
+            raise DAVError(404, "Source file not found.")
 
         if dest_local_path.exists():
             raise DAVError(405, "Destination already exists.")
 
         try:
-            source_path = Path(self.local_path)
             dest_local_path.parent.mkdir(parents=True, exist_ok=True)
-            shutil.move(str(source_path), str(dest_local_path))
+
+            if is_move:
+                shutil.move(str(source_local_path), str(dest_local_path))
+            else:
+                shutil.copy2(str(source_local_path), str(dest_local_path))
+
+            parent_dav_path = posixpath.dirname(self.path)
+            parent_res = self.provider.get_resource_inst(parent_dav_path, self.environ)
+            if parent_res and hasattr(parent_res, "_children_cache"):
+                del parent_res._children_cache
+
+            dest_parent_dav_path = posixpath.dirname(dest_path)
+            if dest_parent_dav_path != parent_dav_path:
+                dest_parent_res = self.provider.get_resource_inst(dest_parent_dav_path, self.environ)
+                if dest_parent_res and hasattr(dest_parent_res, "_children_cache"):
+                    del dest_parent_res._children_cache
             return True
+
         except Exception as e:
-            raise DAVError(500, f"Error moving file: {e}") from e
+            logger.error(f"Error during {op_name} for {self.local_path}: {e}", exc_info=True)
+            raise DAVError(500, f"Failed to {op_name} resource: {e}") from e
 
     def is_readonly(self) -> bool:
         """
         是否只读
         """
-        return self.is_pan_file
+        return self.is_pan_file or self.is_strm
 
 
 class WebDAVFolderResource(WebDAVResourceBase, DAVCollection):
@@ -382,7 +442,7 @@ class WebDAVFolderResource(WebDAVResourceBase, DAVCollection):
         self,
         path: str,
         environ: dict,
-        attr: Mapping,
+        attr: MutableDict,
         local_mapping_path: Optional[str] = None,
         provider=None,
         is_pan_folder: bool = False,
@@ -445,13 +505,15 @@ class WebDAVFolderResource(WebDAVResourceBase, DAVCollection):
                 original_name = folder_data["name"]
                 safe_name = original_name.replace("/", "|")
                 path = posixpath.join(dir_path, safe_name)
-                folder_attr = {
-                    "id": folder_data["id"],
-                    "name": original_name,
-                    "is_dir": True,
-                    "mtime": 0,
-                    "size": 0,
-                }
+                folder_attr = MutableDict(
+                    {
+                        "id": folder_data["id"],
+                        "name": original_name,
+                        "is_dir": True,
+                        "mtime": 0,
+                        "size": 0,
+                    }
+                )
                 local_mapping = (
                     self.provider._get_local_path_from_dav(path)
                     if self.provider
@@ -476,14 +538,16 @@ class WebDAVFolderResource(WebDAVResourceBase, DAVCollection):
                     display_name = splitext(safe_name)[0] + ".strm"
 
                 path = posixpath.join(dir_path, display_name)
-                file_attr = {
-                    "id": file_data["id"],
-                    "name": original_name,
-                    "pickcode": file_data["pickcode"],
-                    "is_dir": False,
-                    "mtime": file_data["mtime"],
-                    "size": file_data["size"],
-                }
+                file_attr = MutableDict(
+                    {
+                        "id": file_data["id"],
+                        "name": original_name,
+                        "pickcode": file_data["pickcode"],
+                        "is_dir": False,
+                        "mtime": file_data["mtime"],
+                        "size": file_data["size"],
+                    }
+                )
                 children[display_name] = WebDAVFileResource(
                     path,
                     environ,
@@ -529,13 +593,15 @@ class WebDAVFolderResource(WebDAVResourceBase, DAVCollection):
                     continue
 
                 if item_path.is_file():
-                    file_attr = {
-                        "id": f"local_{hash(str(item_path))}",
-                        "name": name,
-                        "is_dir": False,
-                        "mtime": item_path.stat().st_mtime,
-                        "size": item_path.stat().st_size,
-                    }
+                    file_attr = MutableDict(
+                        {
+                            "id": f"local_{hash(str(item_path))}",
+                            "name": name,
+                            "is_dir": False,
+                            "mtime": item_path.stat().st_mtime,
+                            "size": item_path.stat().st_size,
+                        }
+                    )
                     children[name] = WebDAVFileResource(
                         path,
                         environ,
@@ -547,13 +613,15 @@ class WebDAVFolderResource(WebDAVResourceBase, DAVCollection):
                         is_pan_file=False,
                     )
                 elif item_path.is_dir():
-                    folder_attr = {
-                        "id": f"local_folder_{hash(str(item_path))}",
-                        "name": name,
-                        "is_dir": True,
-                        "mtime": item_path.stat().st_mtime,
-                        "size": 0,
-                    }
+                    folder_attr = MutableDict(
+                        {
+                            "id": f"local_folder_{hash(str(item_path))}",
+                            "name": name,
+                            "is_dir": True,
+                            "mtime": item_path.stat().st_mtime,
+                            "size": 0,
+                        }
+                    )
                     children[name] = WebDAVFolderResource(
                         path,
                         environ,
@@ -712,13 +780,15 @@ class WebDAVFolderResource(WebDAVResourceBase, DAVCollection):
             new_folder_path.mkdir(mode=0o755)
             new_folder_path.chmod(0o755)
 
-            folder_attr = {
-                "id": f"local_folder_{hash(str(new_folder_path))}",
-                "name": name,
-                "is_dir": True,
-                "mtime": new_folder_path.stat().st_mtime,
-                "size": 0,
-            }
+            folder_attr = MutableDict(
+                {
+                    "id": f"local_folder_{hash(str(new_folder_path))}",
+                    "name": name,
+                    "is_dir": True,
+                    "mtime": new_folder_path.stat().st_mtime,
+                    "size": 0,
+                }
+            )
             new_path = posixpath.join(self.path, name)
             new_resource = WebDAVFolderResource(
                 new_path,
@@ -757,13 +827,15 @@ class WebDAVFolderResource(WebDAVResourceBase, DAVCollection):
             new_file_path.touch()
             new_file_path.chmod(0o644)
 
-            file_attr = {
-                "id": f"local_file_{hash(str(new_file_path))}",
-                "name": name,
-                "is_dir": False,
-                "mtime": new_file_path.stat().st_mtime,
-                "size": 0,
-            }
+            file_attr = MutableDict(
+                {
+                    "id": f"local_file_{hash(str(new_file_path))}",
+                    "name": name,
+                    "is_dir": False,
+                    "mtime": new_file_path.stat().st_mtime,
+                    "size": 0,
+                }
+            )
             new_path = posixpath.join(self.path, name)
             new_resource = WebDAVFileResource(
                 new_path,
@@ -818,8 +890,6 @@ class WebDAVFileSystemProvider(DAVProvider):
         从WebDAV路径获取本地路径
         """
         try:
-            import urllib.parse
-
             decoded_path = urllib.parse.unquote(path)
         except Exception:
             decoded_path = path
@@ -838,7 +908,9 @@ class WebDAVFileSystemProvider(DAVProvider):
         """
         norm_path = posixpath.normpath(posixpath.join("/", path))
 
-        root_attr = {"id": 0, "name": "root", "is_dir": True, "mtime": 0, "size": 0}
+        root_attr = MutableDict(
+            {"id": 0, "name": "root", "is_dir": True, "mtime": 0, "size": 0}
+        )
         current_res = WebDAVFolderResource(
             "/",
             environ,
@@ -879,7 +951,7 @@ class WebDAVFileSystemProvider(DAVProvider):
         return False
 
 
-def create_hybrid_webdav_app(local_mapping_path: str):
+def create_webdav_app(local_mapping_path: str):
     """
     创建混合WebDAV应用
     """
